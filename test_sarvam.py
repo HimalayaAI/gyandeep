@@ -1,22 +1,18 @@
 import asyncio
-import os
-from dotenv import load_dotenv
 
-load_dotenv()
-
+from config import SARVAMAI_KEY, API_KEY_PLACEHOLDER
 from sarvamai import SarvamAI
 
 async def test():
-    api_key = os.getenv("SARVAMAI_KEY")
-    if not api_key or api_key == "your_key_here":
+    if not SARVAMAI_KEY or SARVAMAI_KEY == API_KEY_PLACEHOLDER:
         print("API Key not found or empty.")
         return
 
-    client = SarvamAI(api_subscription_key=api_key)
+    client = SarvamAI(api_subscription_key=SARVAMAI_KEY)
     try:
         response = await asyncio.to_thread(
             client.chat.completions,
-            model="sarvam-2B-chat", # try a different model just in case? wait, let's try the current one first
+            model="sarvam-2B-chat",
             messages=[{'role': 'user', 'content': 'Hello!'}]
         )
         print("Success:", response)

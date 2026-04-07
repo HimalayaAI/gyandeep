@@ -1,1 +1,16 @@
+# Secrets
 .env
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Generated at runtime
+context.txt
+surrounding_context.txt
+test_out.txt
+
+# User uploads (already-tracked files are unaffected)
+uploads/*
+!uploads/.gitkeep

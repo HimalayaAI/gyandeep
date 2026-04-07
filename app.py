@@ -1,7 +1,6 @@
 import os
 import fitz  # PyMuPDF
 import json
-import logging
 import asyncio
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
@@ -9,25 +8,48 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from dotenv import load_dotenv
-load_dotenv()
+from config import (
+    SARVAMAI_KEY,
+    API_KEY_PLACEHOLDER,
+    UPLOAD_DIR,
+    STATIC_DIR,
+    TEMPLATES_DIR,
+    TESSERACT_PATH,
+    SARVAM_MODEL,
+    SARVAM_MAX_TOKENS,
+    OCR_MIN_TEXT_LENGTH,
+    OCR_DPI,
+    OCR_FALLBACK_MESSAGE,
+    CONTEXT_WINDOW,
+    GLOBAL_CONTEXT_FILE,
+    ENV_CONTEXT_FILE,
+    DEFAULT_ANALYSIS_MESSAGE,
+    API_EMPTY_RESPONSE_MESSAGE,
+    OCR_SEMAPHORE_LIMIT,
+    ANALYSIS_CHUNK_SIZE,
+    SERVER_HOST,
+    SERVER_PORT,
+    SSE_MEDIA_TYPE,
+    ERR_SARVAM_NOT_CONFIGURED,
+    ERR_NO_PDF_UPLOADED,
+    ERR_NO_CONTEXT,
+    validate_config,
+)
+from logger import get_logger
 
 # Setup PyTesseract
 import pytesseract
 from PIL import Image
 import io
 
-# We assume Tesseract goes here under default installation paths on Windows.
-tesseract_path = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-if os.path.exists(tesseract_path):
-    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+if os.path.exists(TESSERACT_PATH):
+    pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 
 # Setup Sarvam AI
 try:
     from sarvamai import SarvamAI
-    api_key = os.getenv("SARVAMAI_KEY")
-    if api_key and api_key != "your_key_here":
-        sarvam_client = SarvamAI(api_subscription_key=api_key)
+    if SARVAMAI_KEY and SARVAMAI_KEY != API_KEY_PLACEHOLDER:
+        sarvam_client = SarvamAI(api_subscription_key=SARVAMAI_KEY)
     else:
         sarvam_client = None
 except ImportError:
@@ -35,33 +57,53 @@ except ImportError:
 
 app = FastAPI()
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
-os.makedirs("uploads", exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 global_pdf_data = {
     "filename": None,
     "filepath": None,
     "toc": [],
-    "pages": {}, # Cache for text per page {page_index: text}
+    "pages": {},
     "total_pages": 0,
-    "analysis": "No global analysis has been generated yet for this document."
+    "analysis": DEFAULT_ANALYSIS_MESSAGE
 }
 
-SARVAM_MODEL = "sarvam-30b" # Replace with 'sarvam-105b' or 'sarvam-2B-chat' based on your access.
+logger = get_logger(__name__)
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
+def _extract_response_content(response) -> str:
+    """Pull usable text from a Sarvam API response.
+
+    Reasoning models sometimes spend all completion tokens on
+    ``reasoning_content`` and leave ``content`` empty.  This helper
+    checks ``content`` first, then falls back to ``reasoning_content``.
+    """
+    msg = response.choices[0].message
+    if msg.content and msg.content.strip():
+        return msg.content.strip()
+    reasoning = getattr(msg, "reasoning_content", None)
+    if reasoning and reasoning.strip():
+        logger.warning("API returned empty content; falling back to reasoning_content")
+        return reasoning.strip()
+    return ""
+
+
+@app.on_event("startup")
+async def startup_event():
+    validate_config()
+
 
 @app.get("/", response_class=HTMLResponse)
 async def read_index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 @app.post("/api/upload")
 async def upload_pdf(file: UploadFile = File(...)):
     global global_pdf_data
-    file_path = f"uploads/{file.filename}"
+    file_path = f"{UPLOAD_DIR}/{file.filename}"
     
     with open(file_path, "wb") as f:
         f.write(await file.read())
@@ -75,9 +117,9 @@ async def upload_pdf(file: UploadFile = File(...)):
             "filename": file.filename,
             "filepath": file_path,
             "toc": toc,
-            "pages": {}, # We'll extract text lazily
+            "pages": {},
             "total_pages": total_pages,
-            "analysis": "No global analysis has been generated yet for this document."
+            "analysis": DEFAULT_ANALYSIS_MESSAGE
         }
         
         doc.close()
@@ -93,7 +135,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Expose uploads folder for the frontend PDF reader
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 def extract_page_sync(page_index: int) -> str:
     """Synchronous function to perform extraction and Tesseract OCR on a single page"""
@@ -114,17 +156,16 @@ def extract_page_sync(page_index: int) -> str:
     page = doc[page_index]
     text = page.get_text("text").strip()
     
-    # Using Tesseract OCR if text isn't deeply embedded
-    if len(text) < 20:
+    if len(text) < OCR_MIN_TEXT_LENGTH:
         logger.info(f"Page {page_index+1} lacks native text. Running Tesseract OCR...")
         try:
-            pix = page.get_pixmap(dpi=150) # Tesseract likes slightly higher DPI
+            pix = page.get_pixmap(dpi=OCR_DPI)
             img_bytes = pix.tobytes("png")
             img = Image.open(io.BytesIO(img_bytes))
             text = pytesseract.image_to_string(img)
         except Exception as e:
             logger.error(f"Tesseract Error: {e}")
-            text = "[Image could not be parsed by Tesseract]"
+            text = OCR_FALLBACK_MESSAGE
             
     global_pdf_data["pages"][page_index] = text
     doc.close()
@@ -134,7 +175,7 @@ async def extract_page_async(page_index: int) -> str:
     """Run the synchronous extraction in a thread pool to avoid blocking FastAPI"""
     return await asyncio.to_thread(extract_page_sync, page_index)
 
-async def build_context(center_page: int, window: int = 5) -> str:
+async def build_context(center_page: int, window: int = CONTEXT_WINDOW) -> str:
     global global_pdf_data
     total = global_pdf_data["total_pages"]
     if total == 0:
@@ -143,7 +184,6 @@ async def build_context(center_page: int, window: int = 5) -> str:
     start_page = max(0, center_page - window)
     end_page = min(total - 1, center_page + window)
     
-    # We await all pages in the window (Running OCR concurrently if needed)
     tasks = [extract_page_async(p) for p in range(start_page, end_page + 1)]
     results = await asyncio.gather(*tasks)
     
@@ -162,7 +202,7 @@ async def analyze_env(request: Request):
     and asks Sarvam to create a high-level summary of this section.
     """
     if not sarvam_client:
-        raise HTTPException(status_code=500, detail="Sarvam AI client not configured. Check your .env API Key")
+        raise HTTPException(status_code=500, detail=ERR_SARVAM_NOT_CONFIGURED)
         
     data = await request.json()
     current_page = data.get("current_page", 1) - 1 # 0-indexed
@@ -170,9 +210,9 @@ async def analyze_env(request: Request):
     global global_pdf_data
     total = global_pdf_data["total_pages"]
     if total == 0:
-        raise HTTPException(status_code=400, detail="No PDF uploaded")
+        raise HTTPException(status_code=400, detail=ERR_NO_PDF_UPLOADED)
         
-    extracted_text = await build_context(current_page, window=5)
+    extracted_text = await build_context(current_page, window=CONTEXT_WINDOW)
     
     prompt = f"""You are a document analyzer. Convert this raw OCR text into highly structured, clean synthetic data context.
 Provide a clear, high-level summary of what this specific section is about and outline its main topics.
@@ -186,15 +226,15 @@ Raw OCR Document Text:
             sarvam_client.chat.completions,
             model=SARVAM_MODEL,
             messages=[{'role': 'user', 'content': prompt}],
+            max_tokens=SARVAM_MAX_TOKENS,
         )
-        content = response.choices[0].message.content
-        analysis_result = content.strip() if content else "[Error: API returned empty or rejected response for this context]"
+        extracted = _extract_response_content(response)
+        analysis_result = extracted if extracted else API_EMPTY_RESPONSE_MESSAGE
         
-        # Save Env conversion to distinct file
-        with open("surrounding_context.txt", "w", encoding="utf-8") as f:
+        with open(ENV_CONTEXT_FILE, "w", encoding="utf-8") as f:
             f.write(analysis_result)
             
-        return JSONResponse(content={"analysis": analysis_result + " (Saved to surrounding_context.txt)"})
+        return JSONResponse(content={"analysis": analysis_result + f" (Saved to {ENV_CONTEXT_FILE})"})
     except Exception as e:
         logger.error(f"Analysis Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -206,29 +246,26 @@ async def analyze_global():
     and then asks Sarvam AI for synthetic data conversion into context.txt.
     """
     if not sarvam_client:
-        raise HTTPException(status_code=500, detail="Sarvam AI client not configured. Check your .env API Key")
+        raise HTTPException(status_code=500, detail=ERR_SARVAM_NOT_CONFIGURED)
 
     global global_pdf_data
     total = global_pdf_data["total_pages"]
     if total == 0:
-        raise HTTPException(status_code=400, detail="No PDF uploaded")
+        raise HTTPException(status_code=400, detail=ERR_NO_PDF_UPLOADED)
         
-    sem = asyncio.Semaphore(20)
+    sem = asyncio.Semaphore(OCR_SEMAPHORE_LIMIT)
     async def extract_with_semaphore(p):
         async with sem:
             return await extract_page_async(p)
             
-    CHUNK_SIZE = 20 # Processing in 20-page chunks to avoid token limits
-    
-    # Initialize context.txt to clear previous data
-    with open("context.txt", "w", encoding="utf-8") as f:
+    with open(GLOBAL_CONTEXT_FILE, "w", encoding="utf-8") as f:
         f.write("")
         
     overall_analysis = ""
     
     try:
-        for i in range(0, total, CHUNK_SIZE):
-            chunk_end = min(i + CHUNK_SIZE, total)
+        for i in range(0, total, ANALYSIS_CHUNK_SIZE):
+            chunk_end = min(i + ANALYSIS_CHUNK_SIZE, total)
             logger.info(f"Processing global analysis for pages {i+1} to {chunk_end}...")
             
             tasks = [extract_with_semaphore(p) for p in range(i, chunk_end)]
@@ -249,21 +286,21 @@ Raw Document Text (Pages {i+1} to {chunk_end}):
                 sarvam_client.chat.completions,
                 model=SARVAM_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
+                max_tokens=SARVAM_MAX_TOKENS,
             )
-            content = response.choices[0].message.content
-            analysis_result = content.strip() if content else "[Error: API returned empty or rejected response for this context]"
+            extracted = _extract_response_content(response)
+            analysis_result = extracted if extracted else API_EMPTY_RESPONSE_MESSAGE
             
-            # -------------------------------------------------------------
-            # VITAL REQUIREMENT: Appending structured data in chunks
-            # -------------------------------------------------------------
-            with open("context.txt", "a", encoding="utf-8") as f:
+            with open(GLOBAL_CONTEXT_FILE, "a", encoding="utf-8") as f:
                 f.write(f"\n\n--- Analysis for Pages {i+1} to {chunk_end} ---\n\n")
                 f.write(analysis_result)
                 
             overall_analysis += f"\n\n--- Analysis for Pages {i+1} to {chunk_end} ---\n\n" + analysis_result
             
         global_pdf_data["analysis"] = overall_analysis
-        return JSONResponse(content={"analysis": "Synthetic data successfully generated in chunks and appended to context.txt!"})
+        return JSONResponse(content={
+            "analysis": f"Synthetic data successfully generated in chunks and appended to {GLOBAL_CONTEXT_FILE}!"
+        })
     except Exception as e:
         logger.error(f"Analysis Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -276,17 +313,16 @@ async def ask_question(request: Request):
     
     global global_pdf_data
     if global_pdf_data["total_pages"] == 0:
-        raise HTTPException(status_code=400, detail="No PDF uploaded")
+        raise HTTPException(status_code=400, detail=ERR_NO_PDF_UPLOADED)
 
     if not sarvam_client:
         async def stream_error():
-            yield f"data: {json.dumps({'error': 'Sarvam AI client not configured! Check your .env file or run pip install.'})}\n\n"
+            yield f"data: {json.dumps({'error': ERR_SARVAM_NOT_CONFIGURED})}\n\n"
             yield "event: end\ndata: {}\n\n"
-        return StreamingResponse(stream_error(), media_type="text/event-stream")
+        return StreamingResponse(stream_error(), media_type=SSE_MEDIA_TYPE)
 
-    # Read strictly from physical files based on requested mode
-    target_file = "context.txt" if mode == "analyze" else "surrounding_context.txt"
-    file_context = "No context data found! Please securely run the equivalent Analysis button first to extract and generate the data."
+    target_file = GLOBAL_CONTEXT_FILE if mode == "analyze" else ENV_CONTEXT_FILE
+    file_context = ERR_NO_CONTEXT
     
     if os.path.exists(target_file):
         with open(target_file, "r", encoding="utf-8") as f:
@@ -303,7 +339,6 @@ Extracted Synthetic Context ({target_file}):
     user_prompt = f"Question: {query}"
 
     async def single_chunk_response():
-        # Using synchronous fetch then yielding to simulate streaming
         try:
             response = await asyncio.to_thread(
                 sarvam_client.chat.completions,
@@ -311,9 +346,10 @@ Extracted Synthetic Context ({target_file}):
                 messages=[
                     {'role': 'system', 'content': system_prompt},
                     {'role': 'user', 'content': user_prompt}
-                ]
+                ],
+                max_tokens=SARVAM_MAX_TOKENS,
             )
-            content = response.choices[0].message.content
+            content = _extract_response_content(response)
             yield f"data: {json.dumps({'content': content})}\n\n"
             yield "event: end\ndata: {}\n\n"
         except Exception as e:
@@ -321,8 +357,8 @@ Extracted Synthetic Context ({target_file}):
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
             yield "event: end\ndata: {}\n\n"
 
-    return StreamingResponse(single_chunk_response(), media_type="text/event-stream")
+    return StreamingResponse(single_chunk_response(), media_type=SSE_MEDIA_TYPE)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app:app", host=SERVER_HOST, port=SERVER_PORT, reload=True)
