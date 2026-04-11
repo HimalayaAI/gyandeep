@@ -22,6 +22,7 @@
 ### Chemistry
 
 - Mixture
+- Solid, liquid, gas
 
 ### Geology and Astronomy
 
