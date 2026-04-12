@@ -7,8 +7,9 @@ from core.agents.prompt_manager import PromptManager
 class _FakeInference:
     def __init__(self):
         self.messages = None
+        self.max_tokens = 1200
 
-    def chat_completions(self, messages):
+    def chat_completions(self, messages, max_tokens=None):
         self.messages = messages
 
         class _Msg:
@@ -43,6 +44,12 @@ def test_prompt_manager_formats_whole_book():
 
 @pytest.mark.asyncio
 async def test_context_manager_builds_structured_context():
-    manager = ContextManager(_FakeInference())
+    manager = ContextManager(
+        _FakeInference(),
+        model_context_window=2000,
+        safety_tokens=200,
+        token_char_ratio=4.0,
+        summary_max_tokens=300,
+    )
     structured = await manager.build_structured_context("raw text")
     assert "Structured summary" in structured

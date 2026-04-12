@@ -10,9 +10,9 @@ def test_build_params_includes_reasoning_effort():
         temperature=0.5,
         reasoning_effort="medium",
     )
-    params = service.build_params([{"role": "user", "content": "hi"}])
+    params = service.build_params([{"role": "user", "content": "hi"}], max_tokens=77)
     assert params["model"] == "sarvam-m"
-    assert params["max_tokens"] == 123
+    assert params["max_tokens"] == 77
     assert params["temperature"] == 0.5
     assert params["reasoning_effort"] == "medium"
 

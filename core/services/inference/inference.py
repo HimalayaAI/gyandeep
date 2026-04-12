@@ -29,21 +29,21 @@ class InferenceService:
     def is_configured(self) -> bool:
         return self._client is not None
 
-    def build_params(self, messages: list[dict]) -> dict:
+    def build_params(self, messages: list[dict], max_tokens: int | None = None) -> dict:
         params = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
             "temperature": self.temperature,
         }
         if self.reasoning_effort:
             params["reasoning_effort"] = self.reasoning_effort
         return params
 
-    def chat_completions(self, messages: list[dict]):
+    def chat_completions(self, messages: list[dict], max_tokens: int | None = None):
         if not self._client:
             raise RuntimeError("Sarvam API not configured")
-        return self._client.chat.completions(**self.build_params(messages))
+        return self._client.chat.completions(**self.build_params(messages, max_tokens=max_tokens))
 
     @staticmethod
     def extract_think_and_final(text: str) -> tuple[str, str]:

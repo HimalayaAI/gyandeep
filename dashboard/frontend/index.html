@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GyanDeep Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <link rel="stylesheet" href="/static/index.css">
+</head>
+<body>
+    <div class="dashboard">
+        <!-- PDF Section -->
+        <div class="panel pdf-panel">
+            <div class="panel-header glass">
+                <div class="header-left">
+                    <div class="brand">
+                        <img src="/assets/harl_logo.png" alt="HARL" class="brand-logo" />
+                        <span>GyanDeep</span>
+                    </div>
+                    <button id="catalog-toggle" class="icon-btn catalog-btn" title="Books">&#9776;</button>
+                </div>
+                <div class="controls">
+                    <label for="pdf-upload" class="btn primary-btn">Upload PDF</label>
+                    <input type="file" id="pdf-upload" accept="application/pdf" hidden />
+                    
+                    <div class="page-controls" style="display: none;" id="page-controls">
+                        <button id="prev-page" class="icon-btn">&larr;</button>
+                        <span class="page-info">
+                            Page <input type="number" id="page-num-input" value="1" min="1" class="page-input"> of <span id="page-count">--</span>
+                        </span>
+                        <button id="next-page" class="icon-btn">&rarr;</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="pdf-viewer-container" id="pdf-viewer-container">
+                <aside id="book-catalog" class="book-catalog">
+                    <div class="catalog-header">Books</div>
+                    <div id="book-list" class="book-list">
+                        <div class="book-empty">No books yet.</div>
+                    </div>
+                </aside>
+                <div class="upload-placeholder" id="upload-placeholder">
+                    <div class="icon">📄</div>
+                    <p>Upload a Valid or Scanned PDF</p>
+                </div>
+                <canvas id="pdf-canvas"></canvas>
+            </div>
+        </div>
+
+        <!-- Chat Section -->
+        <div class="panel chat-panel">
+            <div class="panel-header glass">
+                <div class="header-title">Ask AI (Himalaya AI)</div>
+                <div class="controls">
+                    <label class="context-toggle">
+                        <input type="checkbox" id="context-toggle" />
+                        <span class="context-label">Whole Book Context</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="chat-messages" id="chat-messages">
+                <div class="message system-msg">
+                    <div class="avatar">🤖</div>
+                    <div class="content">Hello! Upload a PDF on the left. The OCR system will automatically detect text on the pages you ask about.</div>
+                </div>
+            </div>
+
+            <div class="thinking-panel" id="thinking-panel">
+                <div class="thinking-header">Thinking</div>
+                <div id="thinking-box" class="thinking-box"></div>
+            </div>
+
+            <div class="chat-input-area glass">
+                <form id="chat-form">
+                    <input type="text" id="chat-input" placeholder="Ask a question about the current view..." disabled autocomplete="off" />
+                    <button type="submit" id="send-btn" class="primary-btn" disabled>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Initialize PDF.js worker -->
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <script src="/static/app.js"></script>
+</body>
+</html>

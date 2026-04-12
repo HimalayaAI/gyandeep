@@ -1,0 +1,15 @@
+pymupdf
+sentence-transformers
+psycopg2-binary
+asyncpg
+pytest
+pytest-asyncio
+python-dotenv
+openai
+fastapi
+uvicorn
+jinja2
+pytesseract
+pillow
+python-multipart
+sarvamai
