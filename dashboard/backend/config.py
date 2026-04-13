@@ -58,6 +58,7 @@ SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
 SSE_MEDIA_TYPE = "text/event-stream"
 
 TESSERACT_PATH = os.getenv("TESSERACT_PATH", "")
+MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", str(50 * 1024 * 1024)))  # 50 MB
 
 DEFAULT_ANALYSIS_MESSAGE = "No analysis has been generated yet."
 API_EMPTY_RESPONSE_MESSAGE = "No response content returned by the API."
