@@ -3,6 +3,7 @@ import fitz  # PyMuPDF
 import json
 import asyncio
 import hashlib
+from pathlib import PurePosixPath
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
@@ -46,6 +47,7 @@ from .config import (
     EMBEDDING_SOURCE_PREFIX,
     RETRIEVAL_TOP_K,
     EMBEDDING_WARMUP,
+    MAX_UPLOAD_SIZE,
     validate_config,
 )
 from .logger import get_logger
@@ -327,9 +329,16 @@ async def select_book(request: Request):
 @app.post("/api/upload")
 async def upload_pdf(file: UploadFile = File(...)):
     global global_pdf_data
-    file_path = f"{UPLOAD_DIR}/{file.filename}"
-    
+
     file_bytes = await file.read()
+    if len(file_bytes) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)} MB.")
+
+    safe_name = PurePosixPath(file.filename).name
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+    file_path = os.path.join(UPLOAD_DIR, safe_name)
+
     with open(file_path, "wb") as f:
         f.write(file_bytes)
     file_hash = hashlib.sha256(file_bytes).hexdigest()
@@ -339,10 +348,10 @@ async def upload_pdf(file: UploadFile = File(...)):
         toc = doc.get_toc() # [level, title, page_number]
         total_pages = len(doc)
 
-        book_id = _upsert_book(file.filename, file_hash, total_pages)
+        book_id = _upsert_book(safe_name, file_hash, total_pages)
         
         global_pdf_data = {
-            "filename": file.filename,
+            "filename": safe_name,
             "filepath": file_path,
             "toc": toc,
             "pages": {},
@@ -360,12 +369,12 @@ async def upload_pdf(file: UploadFile = File(...)):
         doc.close()
 
         if PRECOMPUTE_OCR_ON_UPLOAD:
-            logger.info("Starting OCR precompute for %s (%s pages)", file.filename, total_pages)
+            logger.info("Starting OCR precompute for %s (%s pages)", safe_name, total_pages)
             asyncio.create_task(_precompute_ocr_and_embeddings())
         
         return {
             "status": "success",
-            "filename": file.filename,
+            "filename": safe_name,
             "total_pages": total_pages,
             "toc_entries": len(toc),
             "book_id": book_id,
