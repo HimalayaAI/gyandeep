@@ -50,6 +50,7 @@ from .config import (
 )
 from .logger import get_logger
 from core.services.storage.embedding_service import EmbeddingService, index_embeddings
+from core.services.ingestion.embedding_pipeline import chunk_text
 from core.services.inference import InferenceService
 from core.agents.context_manager import ContextManager
 from core.agents.prompt_manager import PromptManager
@@ -461,16 +462,6 @@ async def _build_env_context(current_page: int) -> tuple[str, str]:
     return structured, extracted_text
 
 
-def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[str]:
-    words = text.split()
-    chunks = []
-    i = 0
-    while i < len(words):
-        chunk = words[i:i + chunk_size]
-        chunks.append(" ".join(chunk))
-        i += chunk_size - overlap
-    return chunks
-
 
 async def _precompute_ocr_and_embeddings():
     global global_pdf_data
@@ -499,6 +490,21 @@ async def _precompute_ocr_and_embeddings():
                 global_pdf_data["precompute"]["current_page"],
                 total,
             )
+<<<<<<< Updated upstream
+=======
+            chunks = chunk_text(all_text)
+            embedder = EmbeddingService()
+            try:
+                logger.info("Embedding precompute started (%s chunks)", len(chunks))
+                embeddings = await embedder.get_embeddings(chunks)
+                source_value = global_pdf_data.get("book_id") or global_pdf_data["filename"]
+                source = f"{EMBEDDING_SOURCE_PREFIX}:{source_value}"
+                index_embeddings(chunks, embeddings, source=source)
+                global_pdf_data["precompute"]["embeddings_done"] = True
+                logger.info("Embedding precompute finished")
+            except Exception as exc:
+                logger.warning("Embedding precompute failed: %s", exc)
+>>>>>>> Stashed changes
 
     if PRECOMPUTE_EMBEDDINGS_ON_UPLOAD:
         all_text = "\n\n".join(
