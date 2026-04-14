@@ -51,24 +51,5 @@ if [[ -n "${APP_CMD:-}" ]]; then
   exec bash -lc "$APP_CMD"
 fi
 
-if [[ -f "${ROOT_DIR}/dashboard/backend/app.py" ]]; then
-  echo "Starting app: dashboard backend"
-  exec python -m dashboard.backend.app
-fi
-
-if [[ -f "${ROOT_DIR}/app.py" ]]; then
-  echo "Starting app: app.py"
-  exec python "${ROOT_DIR}/app.py"
-fi
-
-if [[ -f "${ROOT_DIR}/main.py" ]]; then
-  echo "Starting app: main.py"
-  exec python "${ROOT_DIR}/main.py"
-fi
-
-if [[ -f "${ROOT_DIR}/server.py" ]]; then
-  echo "Starting app: server.py"
-  exec python "${ROOT_DIR}/server.py"
-fi
-
-echo "No app entrypoint found. Set APP_CMD to run the Gyandeep app."
+echo "Starting app: dashboard backend"
+exec python -m dashboard.backend.app
