@@ -1,16 +1,15 @@
 from pathlib import Path
 import pandas as pd
-import manim
+from manim import *
 from oldo.ploter import Plotter
 
-csv_path = Path("solution.csv")
+csv_path = Path("files/solution.csv")
 if not csv_path.exists():
     csv_path = Path("manim/files/solution.csv")
 
 df = pd.read_csv(csv_path, skipinitialspace=True)
 df.rename(columns=lambda x: str(x).strip(), inplace=True)
 
-from manim import *
 
 class EquationScene(Scene):
     def construct(self):
