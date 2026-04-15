@@ -1,0 +1,8 @@
+equation,reasoning,plot,x,y,connection,name
+y = x^2 - 4x + 3,Given quadratic equation,new,-1;0;1;2;3;4;5,8;3;0;-1;0;3;8,True,Parabola
+y = (x - 1)(x - 3),Factorization to determine the roots,,,,,
+x = 1,First root obtained from factorization,old,1,0,False,Root A
+x = 3,Second root obtained from factorization,old,3,0,False,Root B
+x_v = -b/(2a) = 2,Vertex x-coordinate using vertex formula,,,,,
+y_v = f(2) = -1,Substituting x_v into the equation,old,2,-1,False,Vertex
+Axis of symmetry: x = 2,Line passing through the vertex,,,,,
