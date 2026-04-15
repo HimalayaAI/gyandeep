@@ -1,0 +1,2 @@
+"equation","reasoning","plot","x","y","connection","name"
+"1 + 2","The sum of the integers one and two.","","","","",""
