@@ -183,6 +183,23 @@ body {
     cursor: not-allowed;
 }
 
+.secondary-btn {
+    background: rgba(56, 189, 248, 0.14);
+    color: #7dd3fc;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 8px;
+    padding: 8px 14px;
+}
+
+.secondary-btn:hover:not(:disabled) {
+    background: rgba(56, 189, 248, 0.24);
+}
+
+.secondary-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .icon-btn {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--glass-border);
@@ -364,6 +381,79 @@ body {
     line-height: 1.5;
 }
 
+.animation-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 280px;
+}
+
+.animation-header {
+    font-size: 0.82rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.animation-status {
+    font-weight: 600;
+    color: #a5f3fc;
+}
+
+.animation-progress summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+}
+
+.animation-log {
+    max-height: 90px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.animation-log-row {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+}
+
+.animation-result {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.animation-video {
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid var(--glass-border);
+    background: #000;
+}
+
+.animation-links {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.animation-links a {
+    color: #7dd3fc;
+    font-size: 0.88rem;
+    text-decoration: none;
+}
+
+.animation-links a:hover {
+    text-decoration: underline;
+}
+
 .system-msg, .bot-msg {
     align-self: flex-start;
 }
@@ -425,6 +515,10 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+#animate-btn {
+    min-width: 88px;
 }
 
 #send-btn svg {

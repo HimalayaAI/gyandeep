@@ -2,6 +2,9 @@ from uuid import UUID
 
 import pytest
 
+from pathlib import Path
+
+from core.models.plugins import PluginJobRequest
 from core.models.storage import Book, LearningEvent, OCRPage, Student, TextChunk
 
 
@@ -37,3 +40,32 @@ def test_text_chunk_embedding_dim():
 
     with pytest.raises(ValueError):
         TextChunk(source="book:1", chunk_index=0, content="hello", embedding=[0.0] * 10)
+
+
+def test_plugin_job_request_trims_and_validates():
+    job = PluginJobRequest(
+        job_id="  job-1 ",
+        plugin_id=" manim_video ",
+        query=" explain area ",
+        context_text="ctx",
+        mode="Environment",
+        current_page=3,
+        output_dir=Path("/tmp/artifacts"),
+    )
+    assert job.job_id == "job-1"
+    assert job.plugin_id == "manim_video"
+    assert job.query == "explain area"
+    assert job.mode == "environment"
+
+
+def test_plugin_job_request_rejects_invalid_mode():
+    with pytest.raises(ValueError):
+        PluginJobRequest(
+            job_id="job-2",
+            plugin_id="manim_video",
+            query="q",
+            context_text="ctx",
+            mode="invalid",
+            current_page=1,
+            output_dir=Path("/tmp/artifacts"),
+        )

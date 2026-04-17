@@ -58,3 +58,37 @@ CREATE INDEX IF NOT EXISTS text_chunks_embedding_idx
     ON text_chunks
     USING ivfflat (embedding vector_cosine_ops)
     WITH (lists = 100);
+
+CREATE TABLE IF NOT EXISTS plugin_jobs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    plugin_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    query TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'environment',
+    current_page INTEGER NOT NULL DEFAULT 1,
+    book_id UUID REFERENCES books(id) ON DELETE SET NULL,
+    context_text TEXT,
+    plan_text TEXT,
+    script_path TEXT,
+    video_path TEXT,
+    error_text TEXT,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS plugin_jobs_status_idx ON plugin_jobs(status);
+CREATE INDEX IF NOT EXISTS plugin_jobs_created_at_idx ON plugin_jobs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS plugin_job_events (
+    id BIGSERIAL PRIMARY KEY,
+    job_id UUID NOT NULL REFERENCES plugin_jobs(id) ON DELETE CASCADE,
+    phase TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS plugin_job_events_job_idx
+    ON plugin_job_events(job_id, created_at);

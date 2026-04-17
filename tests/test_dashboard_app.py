@@ -1,6 +1,7 @@
 import pytest
 
 pytest.importorskip("jinja2")
+from fastapi.testclient import TestClient
 
 from dashboard.backend import app as dashboard_app
 
@@ -12,6 +13,9 @@ def test_dashboard_routes_exist():
     assert "/api/analyze_env" in paths
     assert "/api/analyze_global" in paths
     assert "/api/ask" in paths
+    assert "/api/plugins/jobs" in paths
+    assert "/api/plugins/jobs/{job_id}" in paths
+    assert "/api/plugins/jobs/{job_id}/artifacts/{artifact_type}" in paths
     assert "/static" in paths
     assert "/uploads" in paths
 
@@ -63,3 +67,17 @@ def test_heuristic_reasoning_split():
     )
     assert reasoning == ""
     assert content == text
+
+
+def test_create_plugin_job_requires_query():
+    client = TestClient(dashboard_app.app)
+    response = client.post("/api/plugins/jobs", json={"plugin_id": "manim_video", "query": ""})
+    assert response.status_code == 400
+    assert "query is required" in response.text
+
+
+def test_create_plugin_job_rejects_unknown_plugin():
+    client = TestClient(dashboard_app.app)
+    response = client.post("/api/plugins/jobs", json={"plugin_id": "does_not_exist", "query": "animate this"})
+    assert response.status_code == 400
+    assert "Unknown plugin" in response.text

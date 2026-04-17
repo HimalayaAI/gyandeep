@@ -21,6 +21,7 @@ ASSETS_DIR = str(FRONTEND_DIR / "assets")
 TEMPLATES_DIR = str(FRONTEND_DIR)
 UPLOAD_DIR = str(BASE_DIR / "uploads")
 DATA_DIR = str(BASE_DIR / "data")
+PLUGIN_ARTIFACTS_DIR = str(Path(DATA_DIR) / "plugin_artifacts")
 
 GLOBAL_CONTEXT_FILE = str(Path(DATA_DIR) / "context.txt")
 ENV_CONTEXT_FILE = str(Path(DATA_DIR) / "surrounding_context.txt")
@@ -52,6 +53,9 @@ EMBEDDING_SOURCE_PREFIX = os.getenv("EMBEDDING_SOURCE_PREFIX", "upload")
 RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "4"))
 EMBEDDING_WARMUP = os.getenv("EMBEDDING_WARMUP", "false").lower() in {"1", "true", "yes"}
 
+ANIMATION_CONTEXT_MAX_CHARS = int(os.getenv("ANIMATION_CONTEXT_MAX_CHARS", "9000"))
+ANIMATION_RENDER_TIMEOUT_SECONDS = int(os.getenv("ANIMATION_RENDER_TIMEOUT_SECONDS", "180"))
+
 
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
 SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
@@ -75,3 +79,4 @@ def validate_config() -> None:
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(PLUGIN_ARTIFACTS_DIR, exist_ok=True)

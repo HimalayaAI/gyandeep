@@ -13,6 +13,7 @@ const bookCatalog = document.getElementById('book-catalog');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
+const animateBtn = document.getElementById('animate-btn');
 const chatMessages = document.getElementById('chat-messages');
 const thinkingBox = document.getElementById('thinking-box');
 
@@ -124,6 +125,7 @@ function loadPdfUrl(url) {
         
         chatInput.disabled = false;
         sendBtn.disabled = false;
+        if (animateBtn) animateBtn.disabled = false;
         chatInput.focus();
     }).catch(function(err) {
         console.error('Error loading PDF: ', err);
@@ -220,6 +222,89 @@ function escapeHtml(unsafe) {
          .replace(/'/g, "&#039;");
 }
 
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createAnimationCard(botContent, jobId) {
+    botContent.innerHTML = `
+        <div class="animation-card">
+            <div class="animation-header">Animation Studio</div>
+            <div class="animation-status">Queued (Job ${escapeHtml(jobId)})</div>
+            <details class="animation-progress" open>
+                <summary>Progress</summary>
+                <div class="animation-log"></div>
+            </details>
+            <div class="animation-result"></div>
+        </div>
+    `;
+    return {
+        statusEl: botContent.querySelector('.animation-status'),
+        logEl: botContent.querySelector('.animation-log'),
+        resultEl: botContent.querySelector('.animation-result'),
+    };
+}
+
+function appendAnimationLog(card, line) {
+    if (!card || !card.logEl) return;
+    const row = document.createElement('div');
+    row.className = 'animation-log-row';
+    row.textContent = line;
+    card.logEl.appendChild(row);
+    card.logEl.scrollTop = card.logEl.scrollHeight;
+}
+
+async function pollAnimationJob(jobId, card) {
+    let seenEvents = 0;
+    let attempts = 0;
+    while (attempts < 240) { // 6 minutes max at 1.5s polling
+        attempts += 1;
+        const response = await fetch(`/api/plugins/jobs/${jobId}`);
+        if (!response.ok) {
+            throw new Error(`Job status request failed (${response.status})`);
+        }
+        const data = await response.json();
+        const events = data.events || [];
+        while (seenEvents < events.length) {
+            const event = events[seenEvents];
+            seenEvents += 1;
+            appendAnimationLog(card, `${event.phase}: ${event.message}`);
+            if (card && card.statusEl) {
+                card.statusEl.textContent = `${event.phase}: ${event.message}`;
+            }
+        }
+
+        const status = (data.job && data.job.status) || '';
+        if (status === 'succeeded') {
+            const artifacts = data.artifacts || {};
+            if (card && card.statusEl) {
+                card.statusEl.textContent = 'Ready! Your animation is generated.';
+            }
+            const videoUrl = artifacts.video || '';
+            const scriptUrl = artifacts.script || '';
+            if (card && card.resultEl) {
+                card.resultEl.innerHTML = `
+                    ${videoUrl ? `<video class="animation-video" controls src="${videoUrl}"></video>` : ''}
+                    <div class="animation-links">
+                        ${videoUrl ? `<a href="${videoUrl}" target="_blank" rel="noopener noreferrer">Open Video</a>` : ''}
+                        ${scriptUrl ? `<a href="${scriptUrl}" target="_blank" rel="noopener noreferrer">View Script</a>` : ''}
+                    </div>
+                `;
+            }
+            return;
+        }
+        if (status === 'failed' || status === 'interrupted') {
+            const errorText = data.job && data.job.error_text ? data.job.error_text : 'Animation failed.';
+            if (card && card.statusEl) {
+                card.statusEl.textContent = 'Failed to generate animation.';
+            }
+            throw new Error(errorText);
+        }
+        await sleep(1500);
+    }
+    throw new Error('Animation job timed out. Please try again.');
+}
+
 chatForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const query = chatInput.value.trim();
@@ -310,6 +395,71 @@ chatForm.addEventListener('submit', async (e) => {
         }
         chatInput.disabled = false;
         sendBtn.disabled = false;
+        if (animateBtn) animateBtn.disabled = false;
         chatInput.focus();
     }
 });
+
+if (animateBtn) {
+    animateBtn.addEventListener('click', async () => {
+        const query = chatInput.value.trim();
+        if (!query) {
+            addMessage('system', 'Type a prompt first, then click Animate.');
+            return;
+        }
+        if (!currentPdfFilename) {
+            addMessage('system', 'Upload or select a book before creating animations.');
+            return;
+        }
+
+        const mode = contextToggle && contextToggle.checked ? 'analyze' : 'environment';
+        addMessage('user', `[Animate] ${query}`);
+        chatInput.value = '';
+        if (thinkingPanel) {
+            thinkingPanel.classList.remove('active');
+        }
+
+        chatInput.disabled = true;
+        sendBtn.disabled = true;
+        animateBtn.disabled = true;
+
+        const botMsgDiv = addMessage('bot', 'Creating animation job...');
+        const botContent = botMsgDiv.querySelector('.content');
+        let animationCard = null;
+
+        try {
+            const response = await fetch('/api/plugins/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    plugin_id: 'manim_video',
+                    query: query,
+                    mode: mode,
+                    current_page: pageNum,
+                    book_id: currentBookId
+                })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || `Animation job failed (${response.status})`);
+            }
+
+            animationCard = createAnimationCard(botContent, data.job_id);
+            await pollAnimationJob(data.job_id, animationCard);
+        } catch (err) {
+            if (animationCard && animationCard.statusEl) {
+                animationCard.statusEl.textContent = 'Animation error';
+            }
+            if (animationCard) {
+                appendAnimationLog(animationCard, `failed: ${err.message}`);
+            } else {
+                botContent.innerHTML = `Animation error: ${escapeHtml(err.message)}`;
+            }
+        } finally {
+            chatInput.disabled = false;
+            sendBtn.disabled = false;
+            animateBtn.disabled = false;
+            chatInput.focus();
+        }
+    });
+}

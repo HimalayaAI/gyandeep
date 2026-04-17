@@ -3,9 +3,10 @@ import fitz  # PyMuPDF
 import json
 import asyncio
 import hashlib
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -16,6 +17,7 @@ from .config import (
     STATIC_DIR,
     ASSETS_DIR,
     TEMPLATES_DIR,
+    PLUGIN_ARTIFACTS_DIR,
     TESSERACT_PATH,
     SARVAM_MODEL,
     SARVAM_MAX_TOKENS,
@@ -46,11 +48,14 @@ from .config import (
     EMBEDDING_SOURCE_PREFIX,
     RETRIEVAL_TOP_K,
     EMBEDDING_WARMUP,
+    ANIMATION_CONTEXT_MAX_CHARS,
+    ANIMATION_RENDER_TIMEOUT_SECONDS,
     validate_config,
 )
 from .logger import get_logger
 from core.services.storage.embedding_service import EmbeddingService, index_embeddings
 from core.services.inference import InferenceService
+from core.services.plugins import ManimVideoPlugin, PluginJobRequest, PluginRuntime
 from core.agents.context_manager import ContextManager
 from core.agents.prompt_manager import PromptManager
 
@@ -76,6 +81,14 @@ context_manager = ContextManager(
     safety_tokens=CONTEXT_SAFETY_TOKENS,
     token_char_ratio=CONTEXT_TOKEN_CHAR_RATIO,
     summary_max_tokens=SUMMARY_MAX_TOKENS,
+)
+plugin_runtime = PluginRuntime(artifact_root=PLUGIN_ARTIFACTS_DIR)
+plugin_runtime.register(
+    ManimVideoPlugin(
+        inference_service=inference_service,
+        skill_root="manim-video",
+        render_timeout_seconds=ANIMATION_RENDER_TIMEOUT_SECONDS,
+    )
 )
 
 app = FastAPI()
@@ -271,9 +284,295 @@ def _get_book_by_id(book_id: str) -> Optional[dict]:
         conn.close()
 
 
+def _create_plugin_job(
+    plugin_id: str,
+    query: str,
+    mode: str,
+    current_page: int,
+    book_id: Optional[str],
+    context_text: str,
+) -> Optional[str]:
+    try:
+        conn = _db_connect()
+    except Exception as exc:
+        logger.warning(f"DB connect failed for plugin job creation: {exc}")
+        return None
+
+    query_sql = """
+    INSERT INTO plugin_jobs (plugin_id, status, query, mode, current_page, book_id, context_text)
+    VALUES (%s, 'queued', %s, %s, %s, %s, %s)
+    RETURNING id
+    """
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    query_sql,
+                    (plugin_id, query, mode, current_page, book_id, context_text),
+                )
+                row = cur.fetchone()
+                return str(row[0]) if row else None
+    finally:
+        conn.close()
+
+
+def _append_plugin_job_event(job_id: str, phase: str, message: str) -> None:
+    try:
+        conn = _db_connect()
+    except Exception as exc:
+        logger.warning(f"DB connect failed for plugin event logging: {exc}")
+        return
+
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO plugin_job_events (job_id, phase, message)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (job_id, phase, message),
+                )
+    finally:
+        conn.close()
+
+
+def _update_plugin_job(job_id: str, **fields: Any) -> None:
+    if not fields:
+        return
+
+    allowed_fields = {
+        "status",
+        "plan_text",
+        "script_path",
+        "video_path",
+        "error_text",
+        "started_at",
+        "finished_at",
+        "metadata",
+    }
+    updates = {k: v for k, v in fields.items() if k in allowed_fields}
+    if not updates:
+        return
+
+    try:
+        conn = _db_connect()
+    except Exception as exc:
+        logger.warning(f"DB connect failed for plugin job update: {exc}")
+        return
+
+    set_parts: list[str] = []
+    values: list[Any] = []
+    for key, value in updates.items():
+        if key in {"started_at", "finished_at"} and value == "now":
+            set_parts.append(f"{key} = NOW()")
+        else:
+            set_parts.append(f"{key} = %s")
+            values.append(value)
+    set_parts.append("updated_at = NOW()")
+    values.append(job_id)
+
+    sql = f"UPDATE plugin_jobs SET {', '.join(set_parts)} WHERE id = %s"
+
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, tuple(values))
+    finally:
+        conn.close()
+
+
+def _fetch_plugin_job(job_id: str) -> Optional[dict]:
+    try:
+        conn = _db_connect()
+    except Exception as exc:
+        logger.warning(f"DB connect failed for plugin job lookup: {exc}")
+        return None
+
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, plugin_id, status, query, mode, current_page, book_id, context_text,
+                           plan_text, script_path, video_path, error_text,
+                           created_at, updated_at, started_at, finished_at
+                    FROM plugin_jobs
+                    WHERE id = %s
+                    """,
+                    (job_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return {
+                    "id": str(row[0]),
+                    "plugin_id": row[1],
+                    "status": row[2],
+                    "query": row[3],
+                    "mode": row[4],
+                    "current_page": row[5],
+                    "book_id": str(row[6]) if row[6] else None,
+                    "context_text": row[7] or "",
+                    "plan_text": row[8] or "",
+                    "script_path": row[9],
+                    "video_path": row[10],
+                    "error_text": row[11],
+                    "created_at": row[12].isoformat() if row[12] else None,
+                    "updated_at": row[13].isoformat() if row[13] else None,
+                    "started_at": row[14].isoformat() if row[14] else None,
+                    "finished_at": row[15].isoformat() if row[15] else None,
+                }
+    finally:
+        conn.close()
+
+
+def _fetch_plugin_job_events(job_id: str) -> list[dict]:
+    try:
+        conn = _db_connect()
+    except Exception as exc:
+        logger.warning(f"DB connect failed for plugin events lookup: {exc}")
+        return []
+
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT phase, message, created_at
+                    FROM plugin_job_events
+                    WHERE job_id = %s
+                    ORDER BY created_at ASC
+                    """,
+                    (job_id,),
+                )
+                rows = cur.fetchall()
+                return [
+                    {
+                        "phase": row[0],
+                        "message": row[1],
+                        "created_at": row[2].isoformat() if row[2] else None,
+                    }
+                    for row in rows
+                ]
+    finally:
+        conn.close()
+
+
+def _mark_incomplete_plugin_jobs_interrupted() -> None:
+    try:
+        conn = _db_connect()
+    except Exception as exc:
+        logger.warning(f"DB connect failed for plugin job recovery: {exc}")
+        return
+
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE plugin_jobs
+                    SET status = 'interrupted',
+                        error_text = COALESCE(error_text, 'Server restarted before completion.'),
+                        finished_at = NOW(),
+                        updated_at = NOW()
+                    WHERE status IN ('queued', 'planning', 'scripting', 'rendering')
+                    """
+                )
+                interrupted_count = cur.rowcount
+        if interrupted_count:
+            logger.info("Recovered %s interrupted plugin jobs.", interrupted_count)
+    finally:
+        conn.close()
+
+
+def _truncate_animation_context(text: str) -> str:
+    text = text.strip()
+    if len(text) <= ANIMATION_CONTEXT_MAX_CHARS:
+        return text
+    return text[:ANIMATION_CONTEXT_MAX_CHARS] + "\n\n[truncated]"
+
+
+async def _build_animation_context(query: str, mode: str, current_page: int) -> str:
+    local_raw = await build_context(current_page, window=CONTEXT_WINDOW)
+    local_structured = ""
+    if mode != "analyze" and inference_service.is_configured():
+        try:
+            local_structured, _raw = await _build_env_context(current_page)
+        except Exception as exc:
+            logger.warning(f"Animation structured local context failed: {exc}")
+
+    if mode == "analyze":
+        retrieved_chunks: list[str] = []
+        try:
+            retrieved_chunks = await _retrieve_relevant_chunks(query, RETRIEVAL_TOP_K)
+        except Exception as exc:
+            logger.warning(f"Animation retrieval failed: {exc}")
+
+        sections = []
+        if local_raw.strip():
+            sections.append(f"=== Current Page Window (+/- {CONTEXT_WINDOW}) ===\n{local_raw.strip()}")
+        if retrieved_chunks:
+            chunk_text = "\n\n".join(
+                [f"--- Retrieved Chunk {i+1} ---\n{chunk}" for i, chunk in enumerate(retrieved_chunks)]
+            )
+            sections.append(f"=== Whole Book Retrieval ===\n{chunk_text}")
+        merged = "\n\n".join(sections).strip()
+        return _truncate_animation_context(merged or local_raw)
+
+    preferred = local_structured.strip() if local_structured.strip() else local_raw
+    return _truncate_animation_context(preferred)
+
+
+async def _run_plugin_job(job_id: str) -> None:
+    job = _fetch_plugin_job(job_id)
+    if not job:
+        return
+
+    async def emit(phase: str, message: str) -> None:
+        _append_plugin_job_event(job_id, phase, message)
+        if phase in {"planning", "scripting", "rendering"}:
+            _update_plugin_job(job_id, status=phase)
+
+    _update_plugin_job(job_id, status="planning", started_at="now")
+    _append_plugin_job_event(job_id, "queued", "Animation job accepted.")
+
+    request = PluginJobRequest(
+        job_id=job_id,
+        plugin_id=job["plugin_id"],
+        query=job["query"],
+        context_text=job["context_text"],
+        mode=job["mode"],
+        current_page=job["current_page"],
+        book_id=job["book_id"],
+        output_dir=plugin_runtime.create_job_dir(job_id),
+    )
+
+    try:
+        result = await plugin_runtime.run_job(request, emit)
+        _update_plugin_job(
+            job_id,
+            status="succeeded",
+            plan_text=result.plan_text,
+            script_path=result.script_path,
+            video_path=result.video_path,
+            finished_at="now",
+        )
+        _append_plugin_job_event(job_id, "done", "Animation generated successfully.")
+    except Exception as exc:
+        _update_plugin_job(
+            job_id,
+            status="failed",
+            error_text=str(exc),
+            finished_at="now",
+        )
+        _append_plugin_job_event(job_id, "failed", str(exc))
+
+
 @app.on_event("startup")
 async def startup_event():
     validate_config()
+    _mark_incomplete_plugin_jobs_interrupted()
     if EMBEDDING_WARMUP:
         async def _warmup():
             try:
@@ -323,6 +622,110 @@ async def select_book(request: Request):
     global_pdf_data["pages"] = {}
 
     return JSONResponse(content={"status": "ok", "book": book})
+
+
+@app.post("/api/plugins/jobs")
+async def create_plugin_job(request: Request):
+    data = await request.json()
+    plugin_id = str(data.get("plugin_id", "manim_video")).strip()
+    query = str(data.get("query", "")).strip()
+    mode = str(data.get("mode", "environment")).strip().lower()
+    current_page = int(data.get("current_page", 1)) - 1
+    book_id = data.get("book_id")
+
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+    if mode not in {"environment", "analyze"}:
+        raise HTTPException(status_code=400, detail="mode must be environment or analyze")
+    if current_page < 0:
+        current_page = 0
+    if not plugin_runtime.has_handler(plugin_id):
+        raise HTTPException(status_code=400, detail=f"Unknown plugin: {plugin_id}")
+
+    global global_pdf_data
+    if global_pdf_data["total_pages"] == 0 and book_id:
+        book = _get_book_by_id(book_id)
+        if book:
+            filepath = os.path.join(UPLOAD_DIR, book["filename"])
+            if os.path.exists(filepath):
+                global_pdf_data["filename"] = book["filename"]
+                global_pdf_data["filepath"] = filepath
+                global_pdf_data["total_pages"] = book["total_pages"]
+                global_pdf_data["book_id"] = book_id
+                global_pdf_data["pages"] = {}
+    if global_pdf_data["total_pages"] == 0:
+        raise HTTPException(status_code=400, detail=ERR_NO_PDF_UPLOADED)
+
+    try:
+        context_text = await _build_animation_context(query, mode, current_page)
+    except Exception as exc:
+        logger.error(f"Animation context build failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    resolved_book_id = book_id or global_pdf_data.get("book_id")
+    job_id = _create_plugin_job(
+        plugin_id=plugin_id,
+        query=query,
+        mode=mode,
+        current_page=current_page + 1,
+        book_id=resolved_book_id,
+        context_text=context_text,
+    )
+    if not job_id:
+        raise HTTPException(status_code=500, detail="Failed to persist plugin job")
+
+    asyncio.create_task(_run_plugin_job(job_id))
+    return JSONResponse(
+        content={
+            "status": "queued",
+            "job_id": job_id,
+            "plugin_id": plugin_id,
+        }
+    )
+
+
+@app.get("/api/plugins/jobs/{job_id}")
+async def get_plugin_job(job_id: str):
+    job = _fetch_plugin_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Plugin job not found")
+    events = _fetch_plugin_job_events(job_id)
+    artifacts = {}
+    if job.get("script_path"):
+        artifacts["script"] = f"/api/plugins/jobs/{job_id}/artifacts/script"
+    if job.get("video_path"):
+        artifacts["video"] = f"/api/plugins/jobs/{job_id}/artifacts/video"
+
+    return JSONResponse(content={"job": job, "events": events, "artifacts": artifacts})
+
+
+@app.get("/api/plugins/jobs/{job_id}/artifacts/{artifact_type}")
+async def get_plugin_job_artifact(job_id: str, artifact_type: str):
+    job = _fetch_plugin_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Plugin job not found")
+
+    if artifact_type == "script":
+        path_value = job.get("script_path")
+        media_type = "text/x-python"
+    elif artifact_type == "video":
+        path_value = job.get("video_path")
+        media_type = "video/mp4"
+    else:
+        raise HTTPException(status_code=404, detail="Unknown artifact type")
+
+    if not path_value:
+        raise HTTPException(status_code=404, detail="Artifact not ready")
+
+    path = Path(path_value).resolve()
+    artifact_root = Path(PLUGIN_ARTIFACTS_DIR).resolve()
+    if artifact_root not in path.parents:
+        raise HTTPException(status_code=403, detail="Invalid artifact path")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Artifact file missing")
+
+    return FileResponse(path=str(path), media_type=media_type, filename=path.name)
+
 
 @app.post("/api/upload")
 async def upload_pdf(file: UploadFile = File(...)):
