@@ -884,44 +884,48 @@ async def _precompute_ocr_and_embeddings():
     global_pdf_data["precompute"]["running"] = True
     global_pdf_data["precompute"]["total_pages"] = total
 
-    logger.info("OCR precompute running for %s pages", total)
-    sem = asyncio.Semaphore(OCR_SEMAPHORE_LIMIT)
+    try:
+        logger.info("OCR precompute running for %s pages", total)
+        sem = asyncio.Semaphore(OCR_SEMAPHORE_LIMIT)
 
-    async def extract_with_semaphore(p):
-        async with sem:
-            return await extract_page_async(p)
+        async def extract_with_semaphore(p):
+            async with sem:
+                return await extract_page_async(p)
 
-    batch_size = max(1, OCR_SEMAPHORE_LIMIT)
-    for start in range(0, total, batch_size):
-        tasks = [extract_with_semaphore(p) for p in range(start, min(start + batch_size, total))]
-        await asyncio.gather(*tasks)
-        global_pdf_data["precompute"]["current_page"] = min(start + batch_size, total)
-        if global_pdf_data["precompute"]["current_page"] % 10 == 0 or global_pdf_data["precompute"]["current_page"] == total:
-            logger.info(
-                "OCR precompute progress: %s/%s pages",
-                global_pdf_data["precompute"]["current_page"],
-                total,
+        batch_size = max(1, OCR_SEMAPHORE_LIMIT)
+        for start in range(0, total, batch_size):
+            tasks = [extract_with_semaphore(p) for p in range(start, min(start + batch_size, total))]
+            await asyncio.gather(*tasks)
+            global_pdf_data["precompute"]["current_page"] = min(start + batch_size, total)
+            if global_pdf_data["precompute"]["current_page"] % 10 == 0 or global_pdf_data["precompute"]["current_page"] == total:
+                logger.info(
+                    "OCR precompute progress: %s/%s pages",
+                    global_pdf_data["precompute"]["current_page"],
+                    total,
+                )
+
+        if PRECOMPUTE_EMBEDDINGS_ON_UPLOAD:
+            all_text = "\n\n".join(
+                [global_pdf_data["pages"].get(i, "") for i in range(total)]
             )
+            chunks = _chunk_text(all_text)
+            embedder = EmbeddingService()
+            try:
+                logger.info("Embedding precompute started (%s chunks)", len(chunks))
+                embeddings = await embedder.get_embeddings(chunks)
+                source_value = global_pdf_data.get("book_id") or global_pdf_data["filename"]
+                source = f"{EMBEDDING_SOURCE_PREFIX}:{source_value}"
+                index_embeddings(chunks, embeddings, source=source)
+                global_pdf_data["precompute"]["embeddings_done"] = True
+                logger.info("Embedding precompute finished")
+            except Exception as exc:
+                logger.warning("Embedding precompute failed: %s", exc)
 
-    if PRECOMPUTE_EMBEDDINGS_ON_UPLOAD:
-        all_text = "\n\n".join(
-            [global_pdf_data["pages"].get(i, "") for i in range(total)]
-        )
-        chunks = _chunk_text(all_text)
-        embedder = EmbeddingService()
-        try:
-            logger.info("Embedding precompute started (%s chunks)", len(chunks))
-            embeddings = await embedder.get_embeddings(chunks)
-            source_value = global_pdf_data.get("book_id") or global_pdf_data["filename"]
-            source = f"{EMBEDDING_SOURCE_PREFIX}:{source_value}"
-            index_embeddings(chunks, embeddings, source=source)
-            global_pdf_data["precompute"]["embeddings_done"] = True
-            logger.info("Embedding precompute finished")
-        except Exception as exc:
-            logger.warning(f"Embedding precompute failed: {exc}")
-
-    global_pdf_data["precompute"]["running"] = False
-    logger.info("OCR precompute complete")
+        logger.info("OCR precompute complete")
+    except Exception as exc:
+        logger.error("Precompute failed on book %s: %s", global_pdf_data.get("filename"), exc)
+    finally:
+        global_pdf_data["precompute"]["running"] = False
 
 
 async def _retrieve_relevant_chunks(query: str, top_k: int) -> list[str]:
