@@ -1,6 +1,5 @@
-.env
-venv
 .venv
+venv
 dashboard/uploads/
 dashboard/data/
 .DS_Store
@@ -10,3 +9,4 @@ __pycache__/
 .pytest_cache/
 rust/target/
 rust/Cargo.lock
+.env

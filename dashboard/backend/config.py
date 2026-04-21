@@ -26,14 +26,6 @@ PLUGIN_ARTIFACTS_DIR = str(Path(DATA_DIR) / "plugin_artifacts")
 GLOBAL_CONTEXT_FILE = str(Path(DATA_DIR) / "context.txt")
 ENV_CONTEXT_FILE = str(Path(DATA_DIR) / "surrounding_context.txt")
 
-SARVAMAI_KEY = os.getenv("SARVAMAI_KEY", "")
-API_KEY_PLACEHOLDER = "YOUR_SARVAM_API_KEY"
-SARVAM_MODEL = os.getenv("SARVAM_MODEL", "sarvam-m")
-SARVAM_MAX_TOKENS = int(os.getenv("SARVAM_MAX_TOKENS", "1200"))
-_reasoning_effort = os.getenv("SARVAM_REASONING_EFFORT", "medium").strip()
-SARVAM_REASONING_EFFORT = _reasoning_effort if _reasoning_effort else None
-_default_temp = "0.5" if SARVAM_REASONING_EFFORT else "0.2"
-SARVAM_TEMPERATURE = float(os.getenv("SARVAM_TEMPERATURE", _default_temp))
 MODEL_CONTEXT_WINDOW = int(os.getenv("MODEL_CONTEXT_WINDOW", "7192"))
 CONTEXT_SAFETY_TOKENS = int(os.getenv("CONTEXT_SAFETY_TOKENS", "200"))
 CONTEXT_TOKEN_CHAR_RATIO = float(os.getenv("CONTEXT_TOKEN_CHAR_RATIO", "3.0"))
@@ -67,6 +59,17 @@ DEFAULT_ANALYSIS_MESSAGE = "No analysis has been generated yet."
 API_EMPTY_RESPONSE_MESSAGE = "No response content returned by the API."
 
 ERR_SARVAM_NOT_CONFIGURED = "Sarvam API not configured. Please set SARVAMAI_KEY."
+
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # one config for all
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")       # only used for Ollama/custom
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_MODEL = os.getenv("LLM_MODEL", "llama3")
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS") or "1200")
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE") or "0.7")
+LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT") or None
+
+
+ERR_LLM_NOT_CONFIGURED = "LLM provider not configured. Set LLM_API_KEY or SARVAMAI_KEY."
 ERR_NO_PDF_UPLOADED = "No PDF uploaded yet."
 ERR_NO_CONTEXT = "No analysis context found. Generate it first."
 

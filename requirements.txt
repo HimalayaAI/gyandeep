@@ -13,4 +13,5 @@ pytesseract
 pillow
 python-multipart
 sarvamai
+litellm
 maturin>=1.5,<2.0

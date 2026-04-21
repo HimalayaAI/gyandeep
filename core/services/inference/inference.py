@@ -1,99 +1,55 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
+from typing import Optional, List, Dict, Any
+from .providers import SarvamProvider, LiteLLMProvider
 
 
 @dataclass
 class InferenceService:
+    provider: str  # required: "sarvam", "openai", "anthropic", "ollama", "openrouter", "gemini"
     api_key: str
-    api_key_placeholder: str
     model: str
     max_tokens: int
     temperature: float
-    reasoning_effort: str | None = None
+    base_url: str = ""
+    reasoning_effort: Optional[str] = None
 
-    def __post_init__(self) -> None:
-        self._client = None
-        try:
-            from sarvamai import SarvamAI  # type: ignore
+    def __post_init__(self):
+        self._provider = self._create_provider()
 
-            if self.api_key and self.api_key != self.api_key_placeholder:
-                self._client = SarvamAI(api_subscription_key=self.api_key)
-        except ImportError:
-            self._client = None
-
-    @property
-    def client(self):
-        return self._client
+    def _create_provider(self):
+        if self.provider == "sarvam":
+            if not self.api_key:
+                return None
+            return SarvamProvider(
+                api_key=self.api_key,
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                reasoning_effort=self.reasoning_effort,
+            )
+        elif self.provider in ("openai", "anthropic", "ollama", "openrouter", "gemini"):
+            if not self.api_key and self.provider != "ollama":
+                return None
+            return LiteLLMProvider(
+                provider_name=self.provider,
+                api_key=self.api_key or "ollama",
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                base_url=self.base_url or None,
+            )
+        raise ValueError(f"Unknown provider: {self.provider}")
 
     def is_configured(self) -> bool:
-        return self._client is not None
+        return self._provider is not None
 
-    def build_params(self, messages: list[dict], max_tokens: int | None = None) -> dict:
-        params = {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
-            "temperature": self.temperature,
-        }
-        if self.reasoning_effort:
-            params["reasoning_effort"] = self.reasoning_effort
-        return params
+    def chat_completions(self, messages: List[Dict[str, str]], max_tokens: Optional[int] = None) -> Any:
+        if not self._provider:
+            raise RuntimeError(f"{self.provider} not configured")
+        return self._provider.chat_completions(messages, max_tokens)
 
-    def chat_completions(self, messages: list[dict], max_tokens: int | None = None):
-        if not self._client:
-            raise RuntimeError("Sarvam API not configured")
-        return self._client.chat.completions(**self.build_params(messages, max_tokens=max_tokens))
-
-    @staticmethod
-    def extract_think_and_final(text: str) -> tuple[str, str]:
-        """Extract optional <think> and final content."""
-        if not text:
-            return "", ""
-
-        import re
-
-        lower = text.lower()
-        think_text = ""
-        final_text = text
-
-        if "<think>" in lower:
-            if "</think>" in lower:
-                think_texts = re.findall(r"<think>(.*?)</think>", text, flags=re.IGNORECASE | re.DOTALL)
-                think_text = "\n\n".join(t.strip() for t in think_texts if t.strip())
-                final_text = re.sub(r"<think>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL)
-            else:
-                # Fallback: treat first paragraph after <think> as reasoning if present.
-                after = re.split(r"<think>", text, flags=re.IGNORECASE, maxsplit=1)[-1]
-                parts = re.split(r"\n\s*\n", after, maxsplit=1)
-                if len(parts) > 1:
-                    think_text = parts[0].strip()
-                    final_text = parts[1].strip()
-                else:
-                    final_text = after.strip()
-                    think_text = ""
-
-        final_match = re.search(r"<final>(.*?)</final>", final_text, flags=re.IGNORECASE | re.DOTALL)
-        if not final_match:
-            final_match = re.search(r"<answer>(.*?)</answer>", final_text, flags=re.IGNORECASE | re.DOTALL)
-
-        if final_match:
-            final_text = final_match.group(1).strip()
-        else:
-            final_text = re.sub(r"</?(final|answer)>", "", final_text, flags=re.IGNORECASE).strip()
-
-        final_text = final_text.replace("<think>", "").replace("</think>", "").strip()
-        return final_text, think_text
-
-    def extract_response_payload(self, response) -> tuple[str, str]:
-        """Extract answer content and any reasoning content without exposing it."""
-        msg = response.choices[0].message
-        content = (msg.content or "").strip()
-        reasoning = getattr(msg, "reasoning_content", None)
-        reasoning = reasoning.strip() if reasoning else ""
-
-        content, think_text = self.extract_think_and_final(content)
-        if think_text:
-            reasoning = reasoning or think_text
-
-        return content, reasoning
+    def extract_response_payload(self, response: Any) -> tuple[str, str]:
+        if not self._provider:
+            raise RuntimeError(f"{self.provider} not configured")
+        return self._provider.extract_response_payload(response)

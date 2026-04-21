@@ -11,18 +11,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import (
-    SARVAMAI_KEY,
-    API_KEY_PLACEHOLDER,
     UPLOAD_DIR,
     STATIC_DIR,
     ASSETS_DIR,
     TEMPLATES_DIR,
     PLUGIN_ARTIFACTS_DIR,
     TESSERACT_PATH,
-    SARVAM_MODEL,
-    SARVAM_MAX_TOKENS,
-    SARVAM_REASONING_EFFORT,
-    SARVAM_TEMPERATURE,
     MODEL_CONTEXT_WINDOW,
     CONTEXT_SAFETY_TOKENS,
     CONTEXT_TOKEN_CHAR_RATIO,
@@ -40,7 +34,7 @@ from .config import (
     SERVER_HOST,
     SERVER_PORT,
     SSE_MEDIA_TYPE,
-    ERR_SARVAM_NOT_CONFIGURED,
+    ERR_LLM_NOT_CONFIGURED,
     ERR_NO_PDF_UPLOADED,
     ERR_NO_CONTEXT,
     PRECOMPUTE_OCR_ON_UPLOAD,
@@ -50,6 +44,13 @@ from .config import (
     EMBEDDING_WARMUP,
     ANIMATION_CONTEXT_MAX_CHARS,
     ANIMATION_RENDER_TIMEOUT_SECONDS,
+    LLM_PROVIDER,
+    LLM_API_KEY,
+    LLM_MODEL,
+    LLM_MAX_TOKENS,
+    LLM_TEMPERATURE,
+    LLM_BASE_URL,
+    LLM_REASONING_EFFORT,
     validate_config,
 )
 from .logger import get_logger
@@ -68,12 +69,13 @@ if os.path.exists(TESSERACT_PATH):
     pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 
 inference_service = InferenceService(
-    api_key=SARVAMAI_KEY,
-    api_key_placeholder=API_KEY_PLACEHOLDER,
-    model=SARVAM_MODEL,
-    max_tokens=SARVAM_MAX_TOKENS,
-    temperature=SARVAM_TEMPERATURE,
-    reasoning_effort=SARVAM_REASONING_EFFORT,
+    provider=LLM_PROVIDER,
+    api_key=LLM_API_KEY,
+    model=LLM_MODEL,
+    max_tokens=LLM_MAX_TOKENS,
+    temperature=LLM_TEMPERATURE,
+    base_url=LLM_BASE_URL,
+    reasoning_effort=LLM_REASONING_EFFORT,
 )
 context_manager = ContextManager(
     inference_service,
@@ -127,9 +129,6 @@ def _stream_text_chunks(text: str, size: int = 80):
     for i in range(0, len(text), size):
         yield text[i : i + size]
 
-
-def _sarvam_params(messages: list[dict]) -> dict:
-    return inference_service.build_params(messages)
 
 
 def _db_connect():
@@ -939,7 +938,7 @@ async def analyze_env(request: Request):
     and asks Sarvam to create a high-level summary of this section.
     """
     if not inference_service.is_configured():
-        raise HTTPException(status_code=503, detail=ERR_SARVAM_NOT_CONFIGURED)
+        raise HTTPException(status_code=503, detail=ERR_LLM_NOT_CONFIGURED)
         
     data = await request.json()
     current_page = data.get("current_page", 1) - 1 # 0-indexed
@@ -969,7 +968,7 @@ async def analyze_global():
     and then asks Sarvam AI for synthetic data conversion into context.txt.
     """
     if not inference_service.is_configured():
-        raise HTTPException(status_code=503, detail=ERR_SARVAM_NOT_CONFIGURED)
+        raise HTTPException(status_code=503, detail=ERR_LLM_NOT_CONFIGURED)
 
     global global_pdf_data
     total = global_pdf_data["total_pages"]
@@ -1045,7 +1044,7 @@ async def ask_question(request: Request):
 
     if not inference_service.is_configured():
         async def stream_error():
-            yield f"data: {json.dumps({'error': ERR_SARVAM_NOT_CONFIGURED})}\n\n"
+            yield f"data: {json.dumps({'error': ERR_LLM_NOT_CONFIGURED})}\n\n"
             yield "event: end\ndata: {}\n\n"
         return StreamingResponse(stream_error(), media_type=SSE_MEDIA_TYPE)
 
