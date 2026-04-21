@@ -58,7 +58,6 @@ TESSERACT_PATH = os.getenv("TESSERACT_PATH", "")
 DEFAULT_ANALYSIS_MESSAGE = "No analysis has been generated yet."
 API_EMPTY_RESPONSE_MESSAGE = "No response content returned by the API."
 
-ERR_SARVAM_NOT_CONFIGURED = "Sarvam API not configured. Please set SARVAMAI_KEY."
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # one config for all
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")       # only used for Ollama/custom
