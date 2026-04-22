@@ -15,6 +15,7 @@ class InferenceService:
     reasoning_effort: Optional[str] = None
 
     def __post_init__(self):
+        self.provider = self.provider.lower()
         self._provider = self._create_provider()
 
     def _create_provider(self):
