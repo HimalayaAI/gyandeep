@@ -204,6 +204,8 @@ def _load_ocr_page(book_id: str, page_index: int) -> Optional[str]:
 
 
 def _save_ocr_page(book_id: str, page_index: int, content: str) -> None:
+    # Remove null bytes (PostgreSQL text fields cannot store \x00)
+    content = content.replace('\x00', '')
     try:
         conn = _db_connect()
     except Exception as exc:
