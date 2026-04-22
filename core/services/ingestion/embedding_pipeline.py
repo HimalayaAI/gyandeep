@@ -6,22 +6,15 @@ from pathlib import Path
 
 from core.services.storage.embedding_service import EmbeddingService, index_embeddings
 
-try:
-    from gyandeep_rs import chunk_text as _rs_chunk_text
-
-    def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[str]:
-        return _rs_chunk_text(text, chunk_size, overlap)
-
-except ImportError:
-    def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[str]:  # type: ignore[misc]
-        words = text.split()
-        chunks: list[str] = []
-        i = 0
-        while i < len(words):
-            chunk = words[i : i + chunk_size]
-            chunks.append(" ".join(chunk))
-            i += chunk_size - overlap
-        return chunks
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[str]:
+    words = text.split()
+    chunks: list[str] = []
+    i = 0
+    while i < len(words):
+        chunk = words[i : i + chunk_size]
+        chunks.append(" ".join(chunk))
+        i += chunk_size - overlap
+    return chunks
 
 
 async def run(text_path: str | Path, source: str | None = None) -> None:
