@@ -114,7 +114,7 @@ async def test_manim_video_plugin_fallback_generates_script_and_video(tmp_path: 
     assert result.script_path is not None
     assert result.video_path is not None
     script_text = Path(result.script_path).read_text(encoding="utf-8")
-    assert "class LessonScene(Scene)" in script_text
+    assert "class LessonScene(MovingCameraScene)" in script_text
     assert Path(result.video_path).exists()
     assert events[0][0] == "planning"
 
@@ -147,8 +147,19 @@ def test_fallback_script_is_valid_with_multiline_query():
     query = "could you show step-by-step\nformula for volume of sphere"
     plan = plugin._fallback_plan(query, "formula and geometry context")
     script = plugin._template_script_from_plan(query, plan)
-    assert "class LessonScene(Scene):" in script
+    assert "class LessonScene(MovingCameraScene):" in script
+    assert "GyanDeep" in script
+    assert "camera.frame.animate" in script
     assert plugin._script_looks_valid(script, "LessonScene")
+
+
+def test_real_numbers_fallback_prefers_numberline_visuals():
+    plugin = ManimVideoPlugin(_DummyInference())
+    plan = plugin._fallback_plan("Explain real numbers", "Real numbers include rational and irrational values.")
+    script = plugin._template_script_from_plan("Explain real numbers", plan)
+    assert plan["visual_focus"] == "numberline"
+    assert "NumberLine" in script
+    assert "GyanDeep" in script
 
 
 def test_plan_generation_returns_steps():
