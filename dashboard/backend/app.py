@@ -3,56 +3,110 @@ import fitz  # PyMuPDF
 import json
 import asyncio
 import hashlib
+import re
+import sys
+import uuid
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .config import (
-    SARVAMAI_KEY,
-    API_KEY_PLACEHOLDER,
-    UPLOAD_DIR,
-    STATIC_DIR,
-    ASSETS_DIR,
-    TEMPLATES_DIR,
-    PLUGIN_ARTIFACTS_DIR,
-    TESSERACT_PATH,
-    SARVAM_MODEL,
-    SARVAM_MAX_TOKENS,
-    SARVAM_REASONING_EFFORT,
-    SARVAM_TEMPERATURE,
-    MODEL_CONTEXT_WINDOW,
-    CONTEXT_SAFETY_TOKENS,
-    CONTEXT_TOKEN_CHAR_RATIO,
-    SUMMARY_MAX_TOKENS,
-    OCR_MIN_TEXT_LENGTH,
-    OCR_DPI,
-    OCR_FALLBACK_MESSAGE,
-    CONTEXT_WINDOW,
-    GLOBAL_CONTEXT_FILE,
-    ENV_CONTEXT_FILE,
-    DEFAULT_ANALYSIS_MESSAGE,
-    API_EMPTY_RESPONSE_MESSAGE,
-    OCR_SEMAPHORE_LIMIT,
-    ANALYSIS_CHUNK_SIZE,
-    SERVER_HOST,
-    SERVER_PORT,
-    SSE_MEDIA_TYPE,
-    ERR_SARVAM_NOT_CONFIGURED,
-    ERR_NO_PDF_UPLOADED,
-    ERR_NO_CONTEXT,
-    PRECOMPUTE_OCR_ON_UPLOAD,
-    PRECOMPUTE_EMBEDDINGS_ON_UPLOAD,
-    EMBEDDING_SOURCE_PREFIX,
-    RETRIEVAL_TOP_K,
-    EMBEDDING_WARMUP,
-    ANIMATION_CONTEXT_MAX_CHARS,
-    ANIMATION_RENDER_TIMEOUT_SECONDS,
-    validate_config,
-)
-from .logger import get_logger
+# Ensure imports work when launched from repo root or from dashboard/backend.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+if __package__:
+    from .config import (
+        SARVAMAI_KEY,
+        API_KEY_PLACEHOLDER,
+        UPLOAD_DIR,
+        STATIC_DIR,
+        ASSETS_DIR,
+        TEMPLATES_DIR,
+        PLUGIN_ARTIFACTS_DIR,
+        TESSERACT_PATH,
+        SARVAM_MODEL,
+        SARVAM_MAX_TOKENS,
+        SARVAM_REASONING_EFFORT,
+        SARVAM_TEMPERATURE,
+        MODEL_CONTEXT_WINDOW,
+        CONTEXT_SAFETY_TOKENS,
+        CONTEXT_TOKEN_CHAR_RATIO,
+        SUMMARY_MAX_TOKENS,
+        OCR_MIN_TEXT_LENGTH,
+        OCR_DPI,
+        OCR_FALLBACK_MESSAGE,
+        CONTEXT_WINDOW,
+        GLOBAL_CONTEXT_FILE,
+        ENV_CONTEXT_FILE,
+        DEFAULT_ANALYSIS_MESSAGE,
+        API_EMPTY_RESPONSE_MESSAGE,
+        OCR_SEMAPHORE_LIMIT,
+        ANALYSIS_CHUNK_SIZE,
+        SERVER_HOST,
+        SERVER_PORT,
+        SSE_MEDIA_TYPE,
+        ERR_SARVAM_NOT_CONFIGURED,
+        ERR_NO_PDF_UPLOADED,
+        ERR_NO_CONTEXT,
+        PRECOMPUTE_OCR_ON_UPLOAD,
+        PRECOMPUTE_EMBEDDINGS_ON_UPLOAD,
+        EMBEDDING_SOURCE_PREFIX,
+        RETRIEVAL_TOP_K,
+        EMBEDDING_WARMUP,
+        ANIMATION_CONTEXT_MAX_CHARS,
+        ANIMATION_RENDER_TIMEOUT_SECONDS,
+        validate_config,
+    )
+    from .logger import get_logger
+else:
+    from config import (
+        SARVAMAI_KEY,
+        API_KEY_PLACEHOLDER,
+        UPLOAD_DIR,
+        STATIC_DIR,
+        ASSETS_DIR,
+        TEMPLATES_DIR,
+        PLUGIN_ARTIFACTS_DIR,
+        TESSERACT_PATH,
+        SARVAM_MODEL,
+        SARVAM_MAX_TOKENS,
+        SARVAM_REASONING_EFFORT,
+        SARVAM_TEMPERATURE,
+        MODEL_CONTEXT_WINDOW,
+        CONTEXT_SAFETY_TOKENS,
+        CONTEXT_TOKEN_CHAR_RATIO,
+        SUMMARY_MAX_TOKENS,
+        OCR_MIN_TEXT_LENGTH,
+        OCR_DPI,
+        OCR_FALLBACK_MESSAGE,
+        CONTEXT_WINDOW,
+        GLOBAL_CONTEXT_FILE,
+        ENV_CONTEXT_FILE,
+        DEFAULT_ANALYSIS_MESSAGE,
+        API_EMPTY_RESPONSE_MESSAGE,
+        OCR_SEMAPHORE_LIMIT,
+        ANALYSIS_CHUNK_SIZE,
+        SERVER_HOST,
+        SERVER_PORT,
+        SSE_MEDIA_TYPE,
+        ERR_SARVAM_NOT_CONFIGURED,
+        ERR_NO_PDF_UPLOADED,
+        ERR_NO_CONTEXT,
+        PRECOMPUTE_OCR_ON_UPLOAD,
+        PRECOMPUTE_EMBEDDINGS_ON_UPLOAD,
+        EMBEDDING_SOURCE_PREFIX,
+        RETRIEVAL_TOP_K,
+        EMBEDDING_WARMUP,
+        ANIMATION_CONTEXT_MAX_CHARS,
+        ANIMATION_RENDER_TIMEOUT_SECONDS,
+        validate_config,
+    )
+    from logger import get_logger
 from core.services.storage.embedding_service import EmbeddingService, index_embeddings
 from core.services.inference import InferenceService
 from core.services.plugins import ManimVideoPlugin, PluginJobRequest, PluginRuntime
@@ -116,6 +170,45 @@ global_pdf_data = {
 }
 
 logger = get_logger(__name__)
+
+_memory_plugin_jobs: dict[str, dict[str, Any]] = {}
+_memory_plugin_job_events: dict[str, list[dict[str, Any]]] = {}
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _create_memory_plugin_job(
+    plugin_id: str,
+    query: str,
+    mode: str,
+    current_page: int,
+    book_id: Optional[str],
+    context_text: str,
+) -> str:
+    job_id = str(uuid.uuid4())
+    now = _utc_now_iso()
+    _memory_plugin_jobs[job_id] = {
+        "id": job_id,
+        "plugin_id": plugin_id,
+        "status": "queued",
+        "query": query,
+        "mode": mode,
+        "current_page": current_page,
+        "book_id": book_id,
+        "context_text": context_text,
+        "plan_text": "",
+        "script_path": None,
+        "video_path": None,
+        "error_text": None,
+        "created_at": now,
+        "updated_at": now,
+        "started_at": None,
+        "finished_at": None,
+    }
+    _memory_plugin_job_events[job_id] = []
+    return job_id
 
 
 def _extract_response_payload(response) -> tuple[str, str]:
@@ -296,7 +389,7 @@ def _create_plugin_job(
         conn = _db_connect()
     except Exception as exc:
         logger.warning(f"DB connect failed for plugin job creation: {exc}")
-        return None
+        return _create_memory_plugin_job(plugin_id, query, mode, current_page, book_id, context_text)
 
     query_sql = """
     INSERT INTO plugin_jobs (plugin_id, status, query, mode, current_page, book_id, context_text)
@@ -321,6 +414,14 @@ def _append_plugin_job_event(job_id: str, phase: str, message: str) -> None:
         conn = _db_connect()
     except Exception as exc:
         logger.warning(f"DB connect failed for plugin event logging: {exc}")
+        if job_id in _memory_plugin_jobs:
+            _memory_plugin_job_events.setdefault(job_id, []).append(
+                {
+                    "phase": phase,
+                    "message": message,
+                    "created_at": _utc_now_iso(),
+                }
+            )
         return
 
     try:
@@ -359,6 +460,14 @@ def _update_plugin_job(job_id: str, **fields: Any) -> None:
         conn = _db_connect()
     except Exception as exc:
         logger.warning(f"DB connect failed for plugin job update: {exc}")
+        job = _memory_plugin_jobs.get(job_id)
+        if job is not None:
+            for key, value in updates.items():
+                if key in {"started_at", "finished_at"} and value == "now":
+                    job[key] = _utc_now_iso()
+                else:
+                    job[key] = value
+            job["updated_at"] = _utc_now_iso()
         return
 
     set_parts: list[str] = []
@@ -387,7 +496,8 @@ def _fetch_plugin_job(job_id: str) -> Optional[dict]:
         conn = _db_connect()
     except Exception as exc:
         logger.warning(f"DB connect failed for plugin job lookup: {exc}")
-        return None
+        job = _memory_plugin_jobs.get(job_id)
+        return dict(job) if job else None
 
     try:
         with conn:
@@ -432,7 +542,7 @@ def _fetch_plugin_job_events(job_id: str) -> list[dict]:
         conn = _db_connect()
     except Exception as exc:
         logger.warning(f"DB connect failed for plugin events lookup: {exc}")
-        return []
+        return list(_memory_plugin_job_events.get(job_id, []))
 
     try:
         with conn:
@@ -464,6 +574,12 @@ def _mark_incomplete_plugin_jobs_interrupted() -> None:
         conn = _db_connect()
     except Exception as exc:
         logger.warning(f"DB connect failed for plugin job recovery: {exc}")
+        for job in _memory_plugin_jobs.values():
+            if job.get("status") in {"queued", "planning", "scripting", "rendering"}:
+                job["status"] = "interrupted"
+                job["error_text"] = job.get("error_text") or "Server restarted before completion."
+                job["finished_at"] = _utc_now_iso()
+                job["updated_at"] = _utc_now_iso()
         return
 
     try:
@@ -762,9 +878,20 @@ async def upload_pdf(file: UploadFile = File(...)):
         
         doc.close()
 
-        if PRECOMPUTE_OCR_ON_UPLOAD:
-            logger.info("Starting OCR precompute for %s (%s pages)", file.filename, total_pages)
-            asyncio.create_task(_precompute_ocr_and_embeddings())
+        if PRECOMPUTE_OCR_ON_UPLOAD or PRECOMPUTE_EMBEDDINGS_ON_UPLOAD:
+            logger.info(
+                "Starting background precompute for %s (ocr=%s, embeddings=%s, pages=%s)",
+                file.filename,
+                PRECOMPUTE_OCR_ON_UPLOAD,
+                PRECOMPUTE_EMBEDDINGS_ON_UPLOAD,
+                total_pages,
+            )
+            asyncio.create_task(
+                _precompute_ocr_and_embeddings(
+                    precompute_ocr=PRECOMPUTE_OCR_ON_UPLOAD,
+                    precompute_embeddings=PRECOMPUTE_EMBEDDINGS_ON_UPLOAD,
+                )
+            )
         
         return {
             "status": "success",
@@ -875,8 +1002,14 @@ def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[st
     return chunks
 
 
-async def _precompute_ocr_and_embeddings():
+async def _precompute_ocr_and_embeddings(
+    precompute_ocr: bool = PRECOMPUTE_OCR_ON_UPLOAD,
+    precompute_embeddings: bool = PRECOMPUTE_EMBEDDINGS_ON_UPLOAD,
+):
     global global_pdf_data
+    if not precompute_ocr and not precompute_embeddings:
+        return
+
     total = global_pdf_data["total_pages"]
     if total == 0:
         return
@@ -884,26 +1017,27 @@ async def _precompute_ocr_and_embeddings():
     global_pdf_data["precompute"]["running"] = True
     global_pdf_data["precompute"]["total_pages"] = total
 
-    logger.info("OCR precompute running for %s pages", total)
-    sem = asyncio.Semaphore(OCR_SEMAPHORE_LIMIT)
+    if precompute_ocr or precompute_embeddings:
+        logger.info("Text extraction precompute running for %s pages", total)
+        sem = asyncio.Semaphore(OCR_SEMAPHORE_LIMIT)
 
-    async def extract_with_semaphore(p):
-        async with sem:
-            return await extract_page_async(p)
+        async def extract_with_semaphore(p):
+            async with sem:
+                return await extract_page_async(p)
 
-    batch_size = max(1, OCR_SEMAPHORE_LIMIT)
-    for start in range(0, total, batch_size):
-        tasks = [extract_with_semaphore(p) for p in range(start, min(start + batch_size, total))]
-        await asyncio.gather(*tasks)
-        global_pdf_data["precompute"]["current_page"] = min(start + batch_size, total)
-        if global_pdf_data["precompute"]["current_page"] % 10 == 0 or global_pdf_data["precompute"]["current_page"] == total:
-            logger.info(
-                "OCR precompute progress: %s/%s pages",
-                global_pdf_data["precompute"]["current_page"],
-                total,
-            )
+        batch_size = max(1, OCR_SEMAPHORE_LIMIT)
+        for start in range(0, total, batch_size):
+            tasks = [extract_with_semaphore(p) for p in range(start, min(start + batch_size, total))]
+            await asyncio.gather(*tasks)
+            global_pdf_data["precompute"]["current_page"] = min(start + batch_size, total)
+            if global_pdf_data["precompute"]["current_page"] % 10 == 0 or global_pdf_data["precompute"]["current_page"] == total:
+                logger.info(
+                    "Text extraction precompute progress: %s/%s pages",
+                    global_pdf_data["precompute"]["current_page"],
+                    total,
+                )
 
-    if PRECOMPUTE_EMBEDDINGS_ON_UPLOAD:
+    if precompute_embeddings:
         all_text = "\n\n".join(
             [global_pdf_data["pages"].get(i, "") for i in range(total)]
         )
@@ -921,7 +1055,7 @@ async def _precompute_ocr_and_embeddings():
             logger.warning(f"Embedding precompute failed: {exc}")
 
     global_pdf_data["precompute"]["running"] = False
-    logger.info("OCR precompute complete")
+    logger.info("Precompute complete")
 
 
 async def _retrieve_relevant_chunks(query: str, top_k: int) -> list[str]:
@@ -931,6 +1065,68 @@ async def _retrieve_relevant_chunks(query: str, top_k: int) -> list[str]:
         source_value = global_pdf_data.get("book_id") or global_pdf_data.get("filename")
         source = f"{EMBEDDING_SOURCE_PREFIX}:{source_value}"
     return await embedder.get_relevant_chunks(query, top_k=top_k, source=source)
+
+
+async def _retrieve_keyword_chunks(query: str, top_k: int) -> list[str]:
+    """Fallback retrieval when embeddings are unavailable: score OCR pages by keyword overlap."""
+    total = int(global_pdf_data.get("total_pages") or 0)
+    if total == 0:
+        return []
+
+    query_norm = re.sub(r"\s+", " ", (query or "").lower()).strip()
+    tokens = [
+        t
+        for t in re.findall(r"[a-zA-Z0-9]+", query_norm)
+        if len(t) >= 3 or t.isdigit()
+    ]
+    if not tokens:
+        return []
+
+    example_match = re.search(r"example\s*(\d+)", query_norm)
+    example_no = example_match.group(1) if example_match else None
+
+    scored: list[tuple[int, int, str]] = []
+    for page_idx in range(total):
+        text = (global_pdf_data["pages"].get(page_idx) or "").strip()
+        if not text:
+            text = (await extract_page_async(page_idx) or "").strip()
+        if not text:
+            continue
+
+        page_norm = re.sub(r"\s+", " ", text.lower())
+        score = 0
+
+        if query_norm and query_norm in page_norm:
+            score += 20
+
+        if example_no:
+            for marker in (
+                f"example {example_no}",
+                f"example-{example_no}",
+                f"example {example_no}:",
+                f"example {example_no}.",
+                f"ex {example_no}",
+            ):
+                if marker in page_norm:
+                    score += 25
+                    break
+
+        for token in tokens:
+            if token in page_norm:
+                score += min(6, page_norm.count(token))
+
+        if score > 0:
+            scored.append((score, page_idx, text))
+
+    if not scored:
+        return []
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    selected = scored[: max(1, top_k)]
+    return [
+        f"--- Retrieved Page {page + 1} (keyword fallback) ---\n{content[:2200]}"
+        for _score, page, content in selected
+    ]
 
 @app.post("/api/analyze_env")
 async def analyze_env(request: Request):
@@ -1059,15 +1255,24 @@ async def ask_question(request: Request):
             logger.error(f"Retrieval error: {e}")
 
         if not retrieved_chunks:
+            try:
+                retrieved_chunks = await _retrieve_keyword_chunks(query, RETRIEVAL_TOP_K)
+            except Exception as e:
+                logger.error(f"Keyword fallback retrieval error: {e}")
+
+        if not retrieved_chunks:
             target_file = GLOBAL_CONTEXT_FILE
             if os.path.exists(target_file):
                 with open(target_file, "r", encoding="utf-8") as f:
                     file_context = f.read()
-            else:
-                file_context = (
-                    "No embeddings found for whole-book retrieval. "
-                    "Enable PRECOMPUTE_EMBEDDINGS_ON_UPLOAD=true and re-upload the book."
-                )
+            if not file_context.strip() or file_context == ERR_NO_CONTEXT:
+                structured_context, raw_context = await _build_env_context(current_page)
+                if structured_context.strip():
+                    file_context = structured_context
+                elif raw_context.strip():
+                    file_context = raw_context.strip()
+                else:
+                    file_context = "No text was found in the current page window."
         else:
             file_context = "\n\n".join(
                 [f"--- Retrieved Chunk {i+1} ---\n{chunk}" for i, chunk in enumerate(retrieved_chunks)]

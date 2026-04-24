@@ -150,6 +150,10 @@ def test_fallback_script_is_valid_with_multiline_query():
     assert "class LessonScene(MovingCameraScene):" in script
     assert "GyanDeep" in script
     assert "camera.frame.animate" in script
+    assert "Key Ideas" in script
+    assert "Solution Steps" in script
+    assert "clear_slide(" in script
+    assert "def card(" in script
     assert plugin._script_looks_valid(script, "LessonScene")
 
 
@@ -169,5 +173,18 @@ def test_plan_generation_returns_steps():
         "Area of triangle uses half times base times height.",
     )
     assert mode == "inference_unavailable_fallback"
+    assert isinstance(plan.get("key_ideas"), list)
+    assert 2 <= len(plan["key_ideas"]) <= 3
     assert isinstance(plan.get("steps"), list)
-    assert len(plan["steps"]) >= 4
+    assert len(plan["steps"]) == 3
+
+
+def test_timing_profile_caps_wait_budget_under_one_minute():
+    plugin = ManimVideoPlugin(_DummyInference())
+    plan = plugin._fallback_plan("Explain simple interest", "Interest uses principal, rate, and time.")
+    narration_segments = plugin._build_narration_segments("Explain simple interest", plan)
+    timings = plugin._build_timing_profile(narration_segments)
+
+    assert narration_segments
+    assert sum(timings.values()) <= 40.5
+    assert all(value >= 0.6 for value in timings.values())

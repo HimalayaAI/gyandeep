@@ -7,6 +7,13 @@ from dataclasses import dataclass
 from typing import Iterable, List, Sequence
 
 try:
+    import numpy as _np
+    if not hasattr(_np, "complex_"):
+        _np.complex_ = _np.complex128
+except Exception:
+    _np = None
+
+try:
     from gyandeep_rs import vectors_to_pg_literals as _rs_vec_literals
     from gyandeep_rs import truncate_texts as _rs_truncate
     _HAS_RUST = True
@@ -88,6 +95,11 @@ class EmbeddingService:
         return all_embeddings[0] if single_input else all_embeddings
 
     async def _get_sentence_transformer_embeddings(self, texts: list[str]) -> list[list[float]]:
+        # Avoid TensorFlow import path inside transformers on environments with NumPy 2 ABI mismatches.
+        os.environ.setdefault("USE_TF", "0")
+        os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+        os.environ.setdefault("USE_FLAX", "0")
+        os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
         from sentence_transformers import SentenceTransformer
 
         if self._st_model is None:
