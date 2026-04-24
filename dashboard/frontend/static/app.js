@@ -27,6 +27,25 @@ let pageNumPending = null;
 let currentPdfFilename = null;
 let currentBookId = null;
 
+function renderRichText(element, text) {
+    if (!element) return;
+
+    element.innerHTML = escapeHtml(text).replace(/\n/g, '<br/>');
+
+    if (typeof renderMathInElement !== 'function') return;
+
+    renderMathInElement(element, {
+        throwOnError: false,
+        strict: 'ignore',
+        delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '\\[', right: '\\]', display: true },
+            { left: '$', right: '$', display: false },
+            { left: '\\(', right: '\\)', display: false }
+        ]
+    });
+}
+
 async function refreshBookList(selectedId = null) {
     if (!bookList) return;
     try {
@@ -207,6 +226,7 @@ function addMessage(role, text, isMeta = false) {
             <div class="avatar">${role === 'user' ? '👤' : '🤖'}</div>
             <div class="content">${escapeHtml(text)}</div>
         `;
+        renderRichText(msgDiv.querySelector('.content'), text);
     }
     chatMessages.appendChild(msgDiv);
     chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -380,7 +400,7 @@ chatForm.addEventListener('submit', async (e) => {
                             addMessage('system', dataMsg.content, true);
                         } else if (dataMsg.content) {
                             fullText += dataMsg.content;
-                            botContent.innerHTML = escapeHtml(fullText).replace(/\n/g, '<br/>');
+                            renderRichText(botContent, fullText);
                             chatMessages.scrollTop = chatMessages.scrollHeight;
                         }
                     } catch (e) {}

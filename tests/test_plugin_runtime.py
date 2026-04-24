@@ -114,7 +114,7 @@ async def test_manim_video_plugin_fallback_generates_script_and_video(tmp_path: 
     assert result.script_path is not None
     assert result.video_path is not None
     script_text = Path(result.script_path).read_text(encoding="utf-8")
-    assert "class LessonScene(Scene)" in script_text
+    assert "class LessonScene(MovingCameraScene)" in script_text
     assert Path(result.video_path).exists()
     assert events[0][0] == "planning"
 
@@ -147,8 +147,23 @@ def test_fallback_script_is_valid_with_multiline_query():
     query = "could you show step-by-step\nformula for volume of sphere"
     plan = plugin._fallback_plan(query, "formula and geometry context")
     script = plugin._template_script_from_plan(query, plan)
-    assert "class LessonScene(Scene):" in script
+    assert "class LessonScene(MovingCameraScene):" in script
+    assert "GyanDeep" in script
+    assert "camera.frame.animate" in script
+    assert "Key Ideas" in script
+    assert "Solution Steps" in script
+    assert "clear_slide(" in script
+    assert "def card(" in script
     assert plugin._script_looks_valid(script, "LessonScene")
+
+
+def test_real_numbers_fallback_prefers_numberline_visuals():
+    plugin = ManimVideoPlugin(_DummyInference())
+    plan = plugin._fallback_plan("Explain real numbers", "Real numbers include rational and irrational values.")
+    script = plugin._template_script_from_plan("Explain real numbers", plan)
+    assert plan["visual_focus"] == "numberline"
+    assert "NumberLine" in script
+    assert "GyanDeep" in script
 
 
 def test_plan_generation_returns_steps():
@@ -158,5 +173,18 @@ def test_plan_generation_returns_steps():
         "Area of triangle uses half times base times height.",
     )
     assert mode == "inference_unavailable_fallback"
+    assert isinstance(plan.get("key_ideas"), list)
+    assert 2 <= len(plan["key_ideas"]) <= 3
     assert isinstance(plan.get("steps"), list)
-    assert len(plan["steps"]) >= 4
+    assert len(plan["steps"]) == 3
+
+
+def test_timing_profile_caps_wait_budget_under_one_minute():
+    plugin = ManimVideoPlugin(_DummyInference())
+    plan = plugin._fallback_plan("Explain simple interest", "Interest uses principal, rate, and time.")
+    narration_segments = plugin._build_narration_segments("Explain simple interest", plan)
+    timings = plugin._build_timing_profile(narration_segments)
+
+    assert narration_segments
+    assert sum(timings.values()) <= 40.5
+    assert all(value >= 0.6 for value in timings.values())
