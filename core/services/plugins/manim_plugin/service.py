@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
+import tempfile
 from pathlib import Path
 
 from ..runtime import EmitFn, PluginJobRequest, PluginJobResult
@@ -90,13 +92,22 @@ class ManimVideoService:
         return self._template_script_from_plan(query, plan), "template_script_fallback"
 
     def _render(self, script_path: Path, media_dir: Path) -> Path:
-        return render_manim(
-            script_path=script_path,
-            media_dir=media_dir,
-            scene_name=self._scene_name,
-            quality=self._quality,
-            timeout_seconds=self._render_timeout_seconds,
-        )
+        # Render in a path-safe temporary directory first. Manim/ffmpeg can be
+        # brittle when the project lives in a directory with spaces or quotes.
+        with tempfile.TemporaryDirectory(prefix="manim_render_") as tmp_dir:
+            temp_media_dir = Path(tmp_dir)
+            rendered_video = render_manim(
+                script_path=script_path,
+                media_dir=temp_media_dir,
+                scene_name=self._scene_name,
+                quality=self._quality,
+                timeout_seconds=self._render_timeout_seconds,
+            )
+
+            media_dir.mkdir(parents=True, exist_ok=True)
+            final_video = media_dir / rendered_video.name
+            shutil.copy2(rendered_video, final_video)
+            return final_video
 
     async def run(self, request: PluginJobRequest, emit: EmitFn) -> PluginJobResult:
         await emit("planning", "Building solution blueprint from textbook context...")

@@ -1,5 +1,4 @@
 from __future__ import annotations
-from manim import MathTex, Text
 from textwrap import dedent
 
 from .planning import fallback_plan

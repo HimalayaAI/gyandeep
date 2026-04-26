@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from core.services.plugins import ManimVideoPlugin, PluginJobRequest, PluginRuntime
+from core.services.plugins.manim_plugin.rendering import render_manim
 from core.services.plugins.runtime import PluginJobResult
 
 
@@ -140,6 +142,46 @@ def test_extract_python_block_handles_unclosed_fence():
 def test_script_validation_rejects_invalid_python():
     invalid = "from manim import *\nclass LessonScene(Scene):\n    def construct(self):\n        x ="
     assert not ManimVideoPlugin._script_looks_valid(invalid, "LessonScene")
+
+
+def test_render_manim_timeout_raises_clear_error(monkeypatch, tmp_path: Path):
+    script_path = tmp_path / "script.py"
+    script_path.write_text("from manim import *\n", encoding="utf-8")
+    media_dir = tmp_path / "media"
+
+    def _slow_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=["manim"], timeout=5, output="working", stderr="still rendering")
+
+    monkeypatch.setattr("core.services.plugins.manim_plugin.rendering.subprocess.run", _slow_run)
+    monkeypatch.setattr("core.services.plugins.manim_plugin.rendering.resolve_manim_command", lambda: ["manim"])
+
+    with pytest.raises(RuntimeError, match="timed out after 5 seconds"):
+        render_manim(script_path=script_path, media_dir=media_dir, scene_name="LessonScene", quality="l", timeout_seconds=5)
+
+
+def test_manim_plugin_render_copies_video_from_safe_temp_dir(monkeypatch, tmp_path: Path):
+    plugin = ManimVideoPlugin(_DummyInference(), skill_root=tmp_path / "missing-skill")
+    source_script = tmp_path / "script.py"
+    source_script.write_text("from manim import *\n", encoding="utf-8")
+    target_media_dir = tmp_path / "job" / "media"
+
+    def _fake_render(*, script_path: Path, media_dir: Path, scene_name: str, quality: str, timeout_seconds: int) -> Path:
+        assert script_path == source_script
+        assert scene_name == "LessonScene"
+        assert quality == "l"
+        assert timeout_seconds == 180
+        assert "manim_render_" in media_dir.name
+        rendered = media_dir / "LessonScene.mp4"
+        rendered.write_bytes(b"video-bytes")
+        return rendered
+
+    monkeypatch.setattr("core.services.plugins.manim_plugin.service.render_manim", _fake_render)
+
+    final_video = plugin._render(source_script, target_media_dir)
+
+    assert final_video == target_media_dir / "LessonScene.mp4"
+    assert final_video.exists()
+    assert final_video.read_bytes() == b"video-bytes"
 
 
 def test_fallback_script_is_valid_with_multiline_query():

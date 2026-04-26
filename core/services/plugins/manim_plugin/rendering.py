@@ -59,13 +59,23 @@ def render_manim(
         "--media_dir",
         str(media_dir),
     ]
-    process = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-        check=False,
-    )
+    try:
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = (exc.stdout or "").strip() if isinstance(exc.stdout, str) else ""
+        stderr = (exc.stderr or "").strip() if isinstance(exc.stderr, str) else ""
+        details = stderr or stdout or "No additional output captured before timeout."
+        raise RuntimeError(
+            f"Manim render timed out after {timeout_seconds} seconds. "
+            f"Try increasing ANIMATION_RENDER_TIMEOUT_SECONDS or simplifying the scene. "
+            f"Output: {details[:1200]}"
+        ) from exc
     if process.returncode != 0:
         stderr = (process.stderr or "").strip()
         stdout = (process.stdout or "").strip()
