@@ -116,4 +116,4 @@ def test_ask_returns_config_error_before_env_context_build(monkeypatch):
         dashboard_app.global_pdf_data.update(old_state)
 
     assert response.status_code == 200
-    assert dashboard_app.ERR_SARVAM_NOT_CONFIGURED in response.text
+    assert dashboard_app.ERR_LLM_NOT_CONFIGURED in response.text

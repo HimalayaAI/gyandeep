@@ -32,16 +32,73 @@ GyanDeep is an AI learning platform for Nepali high‑school students. It lets s
    pip install maturin
    maturin develop --release -m rust/Cargo.toml
    ```
-4. Create `.env` from the example and add your API key:
+4. Create `.env` from the example and choose an LLM provider:
    ```bash
    cp .env.example .env
-   # Edit .env and set SARVAMAI_KEY=...
    ```
-5. Start services (DB + app):
+5. Edit `.env` using one of the LLM setup examples below.
+6. Start services (DB + app):
    ```bash
    ./start_services.sh
    ```
-6. Open the app at [http://localhost:8000](http://localhost:8000).
+7. Open the app at [http://localhost:8000](http://localhost:8000).
+
+## LLM Setup
+GyanDeep reads one unified set of `LLM_*` environment variables. Use one of these setups in your `.env`.
+
+### Ollama
+Use Ollama when you want to run a local model.
+
+Install and start Ollama, then pull the model:
+```bash
+ollama serve
+ollama pull llama3
+```
+
+Set `.env`:
+```env
+LLM_PROVIDER=ollama
+LLM_API_KEY=dummy
+LLM_MODEL=llama3
+LLM_MAX_TOKENS=1200
+LLM_TEMPERATURE=0.7
+LLM_BASE_URL=http://localhost:11434
+LLM_REASONING_EFFORT=
+```
+
+For Ollama, `LLM_API_KEY` can be any dummy value. `LLM_MODEL` must match a model available in your local Ollama installation.
+
+### OpenAI
+Use OpenAI when you want hosted OpenAI models.
+
+Set `.env`:
+```env
+LLM_PROVIDER=openai
+LLM_API_KEY=your_openai_api_key
+LLM_MODEL=gpt-4o-mini
+LLM_MAX_TOKENS=1200
+LLM_TEMPERATURE=0.7
+LLM_BASE_URL=
+LLM_REASONING_EFFORT=
+```
+
+For OpenAI, leave `LLM_BASE_URL` empty.
+
+### Sarvam
+Use Sarvam when you want Sarvam-hosted models.
+
+Set `.env`:
+```env
+LLM_PROVIDER=sarvam
+LLM_API_KEY=your_sarvam_api_key
+LLM_MODEL=sarvam-m
+LLM_MAX_TOKENS=1200
+LLM_TEMPERATURE=0.5
+LLM_BASE_URL=
+LLM_REASONING_EFFORT=medium
+```
+
+`LLM_REASONING_EFFORT` is only used by Sarvam. Common values are `low`, `medium`, and `high`.
 
 ## How It Works
 - **Upload** a PDF from the dashboard.
@@ -68,7 +125,11 @@ python -m core.services.ingestion.embedding_pipeline totalBook.txt --source "gra
 
 ## Configuration
 See `.env.example` for all settings. Common ones:
-- `SARVAMAI_KEY` – required for intelligent chat responses
+- `LLM_PROVIDER` – `ollama`, `openai`, `sarvam`, `anthropic`, `gemini`, or `openrouter`
+- `LLM_API_KEY` – provider API key; use `dummy` for local Ollama
+- `LLM_MODEL` – model name to use for chat responses
+- `LLM_BASE_URL` – only needed for Ollama or custom provider endpoints
+- `LLM_MAX_TOKENS`, `LLM_TEMPERATURE`, `LLM_REASONING_EFFORT`
 - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
 - `PRECOMPUTE_OCR_ON_UPLOAD` (default: true)
 - `PRECOMPUTE_EMBEDDINGS_ON_UPLOAD` (default: true)

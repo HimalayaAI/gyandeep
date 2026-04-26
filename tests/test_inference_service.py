@@ -1,31 +1,142 @@
-from core.services.inference.inference import InferenceService
+"""Tests for InferenceService with mocked dependencies."""
+from unittest.mock import MagicMock, patch
+import pytest
 
 
-def test_build_params_includes_reasoning_effort():
-    service = InferenceService(
-        api_key="key",
-        api_key_placeholder="placeholder",
-        model="sarvam-m",
-        max_tokens=123,
-        temperature=0.5,
-        reasoning_effort="medium",
-    )
-    params = service.build_params([{"role": "user", "content": "hi"}], max_tokens=77)
-    assert params["model"] == "sarvam-m"
-    assert params["max_tokens"] == 77
-    assert params["temperature"] == 0.5
-    assert params["reasoning_effort"] == "medium"
+def test_sarvam_provider_configured():
+    with patch.dict("sys.modules", {"sarvamai": MagicMock()}):
+        from core.services.inference.inference import InferenceService
+        service = InferenceService(
+            provider="sarvam",
+            api_key="key",
+            model="sarvam-m",
+            max_tokens=123,
+            temperature=0.5,
+            reasoning_effort="medium",
+        )
+        assert service.is_configured()
 
 
-def test_extract_think_and_final_parses_tags():
-    text = "<think>plan</think>\n<final>Answer.</final>"
-    content, thinking = InferenceService.extract_think_and_final(text)
+def test_sarvam_unconfigured_when_no_key():
+    with patch.dict("sys.modules", {"sarvamai": MagicMock()}):
+        from core.services.inference.inference import InferenceService
+        service = InferenceService(
+            provider="sarvam",
+            api_key="",
+            model="sarvam-m",
+            max_tokens=123,
+            temperature=0.5,
+        )
+        assert not service.is_configured()
+
+
+def test_ollama_configured_without_key():
+    with patch.dict("sys.modules", {"litellm": MagicMock()}):
+        from core.services.inference.inference import InferenceService
+        service = InferenceService(
+            provider="ollama",
+            api_key="",
+            model="llama3",
+            max_tokens=512,
+            temperature=0.7,
+            base_url="http://localhost:11434",
+        )
+        assert service.is_configured()
+
+
+def test_openai_unconfigured_without_key():
+    with patch.dict("sys.modules", {"litellm": MagicMock()}):
+        from core.services.inference.inference import InferenceService
+        service = InferenceService(
+            provider="openai",
+            api_key="",
+            model="gpt-4o",
+            max_tokens=1024,
+            temperature=0.5,
+        )
+        assert not service.is_configured()
+
+
+def test_extract_think_and_final():
+    from core.services.inference.utils import extract_think_and_final
+    content, thinking = extract_think_and_final("<tool_call>plan</tool_call>\n<final>Answer.</final>")
     assert content == "Answer."
     assert thinking == "plan"
 
 
-def test_extract_think_and_final_unclosed_think():
-    text = "<think>Reasoning line 1.\nReasoning line 2.\n\nFinal answer."
-    content, thinking = InferenceService.extract_think_and_final(text)
-    assert thinking.startswith("Reasoning line 1")
-    assert content == "Final answer."
+def test_extract_think_and_final_multiple_tool_calls_before_final():
+    from core.services.inference.utils import extract_think_and_final
+    content, thinking = extract_think_and_final(
+        "<tool_call>one</tool_call>\n<tool_call>two</tool_call>\n<final>Answer.</final>"
+    )
+    assert content == "Answer."
+    assert thinking == "one\n\ntwo"
+
+
+def test_extract_think_and_final_multiple_tool_calls_without_final():
+    from core.services.inference.utils import extract_think_and_final
+    content, thinking = extract_think_and_final(
+        "<tool_call>one</tool_call>\n<tool_call>two</tool_call>\nResult"
+    )
+    assert content == "Result"
+    assert thinking == "one\n\ntwo"
+
+
+def test_litellm_model_string_ollama():
+    with patch.dict("sys.modules", {"litellm": MagicMock()}):
+        from core.services.inference.providers.litellm import LiteLLMProvider
+        provider = LiteLLMProvider(
+            provider_name="ollama",
+            api_key="ollama",
+            model="llama3",
+            max_tokens=512,
+            temperature=0.7,
+            base_url="http://localhost:11434",
+        )
+        assert provider._get_model_string() == "ollama_chat/llama3"
+
+
+def test_litellm_model_string_openai():
+    with patch.dict("sys.modules", {"litellm": MagicMock()}):
+        from core.services.inference.providers.litellm import LiteLLMProvider
+        provider = LiteLLMProvider(
+            provider_name="openai",
+            api_key="sk-test",
+            model="gpt-4o",
+            max_tokens=1024,
+            temperature=0.5,
+        )
+        assert provider._get_model_string() == "gpt-4o"
+
+
+def test_litellm_model_string_gemini():
+    with patch.dict("sys.modules", {"litellm": MagicMock()}):
+        from core.services.inference.providers.litellm import LiteLLMProvider
+        provider = LiteLLMProvider(
+            provider_name="gemini",
+            api_key="AIzaSy...",
+            model="gemini-2.5-flash-lite",
+            max_tokens=1024,
+            temperature=0.5,
+        )
+        assert provider._get_model_string() == "gemini/gemini-2.5-flash-lite"
+
+
+def test_litellm_model_string_openrouter():
+    with patch.dict("sys.modules", {"litellm": MagicMock()}):
+        from core.services.inference.providers.litellm import LiteLLMProvider
+        provider = LiteLLMProvider(
+            provider_name="openrouter",
+            api_key="sk-or-...",
+            model="google/gemini-3.1-flash-lite-preview",
+            max_tokens=1024,
+            temperature=0.5,
+        )
+        assert provider._get_model_string() == "openrouter/google/gemini-3.1-flash-lite-preview"
+
+
+def test_unsupported_provider_raises():
+    with patch.dict("sys.modules", {"litellm": MagicMock()}):
+        from core.services.inference.inference import InferenceService
+        with pytest.raises(ValueError, match="Unknown provider"):
+            InferenceService(provider="unsupported", api_key="x", model="m", max_tokens=1, temperature=0.5)

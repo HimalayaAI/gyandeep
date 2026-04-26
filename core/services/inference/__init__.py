@@ -1,5 +1,4 @@
-"""Inference service entry points."""
+from .inference import InferenceService
+from .utils import extract_think_and_final
 
-from core.services.inference.inference import InferenceService
-
-__all__ = ["InferenceService"]
+__all__ = ["InferenceService", "extract_think_and_final"]
