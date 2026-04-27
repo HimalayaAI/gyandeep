@@ -152,8 +152,9 @@ def test_fallback_script_is_valid_with_multiline_query():
     assert "camera.frame.animate" in script
     assert "Key Ideas" in script
     assert "Solution Steps" in script
-    assert "clear_slide(" in script
-    assert "def card(" in script
+    assert "TransformMatchingTex" in script
+    assert "background_color = WHITE" in script
+    assert "Final answer" in script
     assert plugin._script_looks_valid(script, "LessonScene")
 
 
@@ -163,6 +164,7 @@ def test_real_numbers_fallback_prefers_numberline_visuals():
     script = plugin._template_script_from_plan("Explain real numbers", plan)
     assert plan["visual_focus"] == "numberline"
     assert "NumberLine" in script
+    assert "Key Parts" in script
     assert "GyanDeep" in script
 
 
